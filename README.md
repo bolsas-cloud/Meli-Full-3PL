@@ -51,12 +51,12 @@ Meli-Full-3PL/
 | Calculadora Envios | Completo | `src/modules/calculadoraEnvios.js` |
 | Envios Creados | ~85% | `src/modules/enviosCreados.js` |
 | Dashboard | Completo | `src/modules/dashboard.js` |
+| Gestion de Precios | Completo | `src/modules/precios.js` |
 
 ### Pendientes
 
 | Modulo | Prioridad | Notas |
 |--------|-----------|-------|
-| Gestion de Precios | Alta | Actualizacion masiva, redondeo psicologico |
 | Stock Hibrido | Media | Ya existe parcialmente |
 | Gestion 3PL | Baja | Requiere rediseno |
 
