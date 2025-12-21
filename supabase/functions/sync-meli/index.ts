@@ -100,6 +100,9 @@ serve(async (req) => {
       case 'update-prices':
         return await updatePrices(supabase, accessToken, productos)
 
+      case 'sync-ads':
+        return await syncAds(supabase, accessToken)
+
       default:
         return new Response(
           JSON.stringify({ error: 'Acción no válida' }),
@@ -715,4 +718,194 @@ async function updatePrices(supabase: any, accessToken: string, productos: Produ
     }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+// ============================================
+// SINCRONIZAR COSTOS DE PUBLICIDAD (Ads)
+// Replica la lógica de GAS: ApiMeli_Ads.js
+// - Obtiene advertiser_id
+// - Consulta costos diarios de campañas
+// - Aplica IVA (1.21)
+// - Rellena días faltantes con último valor (API tiene delay de ~2 días)
+// ============================================
+async function syncAds(supabase: any, accessToken: string) {
+  const result = await syncAdsInternal(supabase, accessToken)
+  return new Response(
+    JSON.stringify(result),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function syncAdsInternal(supabase: any, accessToken: string) {
+  try {
+    // ============================================
+    // PASO 1: Obtener Advertiser ID
+    // Endpoint: /advertising/advertisers?product_id=PADS
+    // ============================================
+
+    // Primero intentar obtener de cache (config_meli)
+    const { data: cachedAdvertiser } = await supabase
+      .from('config_meli')
+      .select('valor')
+      .eq('clave', 'advertiser_id')
+      .single()
+
+    let advertiserId = cachedAdvertiser?.valor
+
+    if (!advertiserId) {
+      const advertiserResponse = await fetch(
+        `${ML_API_BASE}/advertising/advertisers?product_id=PADS`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '1'
+          }
+        }
+      )
+
+      if (!advertiserResponse.ok) {
+        console.error('Error obteniendo advertiser_id:', await advertiserResponse.text())
+        return { success: false, error: 'No se pudo obtener advertiser_id' }
+      }
+
+      const advertiserData = await advertiserResponse.json()
+
+      if (advertiserData.advertisers && advertiserData.advertisers.length > 0 && advertiserData.advertisers[0].advertiser_id) {
+        advertiserId = advertiserData.advertisers[0].advertiser_id
+
+        // Guardar en cache
+        await supabase
+          .from('config_meli')
+          .upsert({ clave: 'advertiser_id', valor: String(advertiserId) }, { onConflict: 'clave' })
+      } else {
+        return { success: false, error: 'No se encontró advertiser_id en la respuesta' }
+      }
+    }
+
+    console.log(`Advertiser ID: ${advertiserId}`)
+
+    // ============================================
+    // PASO 2: Obtener costos (INCREMENTAL)
+    // - Si hay datos, consultar desde última fecha - 5 días
+    // - Si no hay datos, consultar últimos 90 días
+    // ============================================
+    const hoy = new Date()
+    let fechaDesde: Date
+
+    // Buscar última fecha guardada
+    const { data: ultimoCosto } = await supabase
+      .from('costos_publicidad')
+      .select('fecha')
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (ultimoCosto?.fecha) {
+      // Sync incremental: desde última fecha - 5 días de margen
+      fechaDesde = new Date(ultimoCosto.fecha)
+      fechaDesde.setDate(fechaDesde.getDate() - 5)
+      console.log(`Sync incremental desde: ${fechaDesde.toISOString().split('T')[0]} (última fecha - 5 días)`)
+    } else {
+      // Primera vez: últimos 90 días
+      fechaDesde = new Date()
+      fechaDesde.setDate(hoy.getDate() - 89)
+      console.log('Primera sincronización: últimos 90 días')
+    }
+
+    const dateFrom = fechaDesde.toISOString().split('T')[0]
+    const dateTo = hoy.toISOString().split('T')[0]
+
+    const costsUrl = `${ML_API_BASE}/advertising/advertisers/${advertiserId}/product_ads/campaigns?date_from=${dateFrom}&date_to=${dateTo}&metrics=cost&aggregation_type=DAILY`
+
+    const costsResponse = await fetch(costsUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'api-version': '2'
+      }
+    })
+
+    if (!costsResponse.ok) {
+      console.error('Error obteniendo costos de ads:', await costsResponse.text())
+      return { success: false, error: 'No se pudieron obtener los costos de publicidad' }
+    }
+
+    const costsData = await costsResponse.json()
+
+    if (!costsData.results || costsData.results.length === 0) {
+      console.log('La API de Ads no devolvió resultados de costos')
+      return { success: true, updated: 0, message: 'Sin datos de publicidad' }
+    }
+
+    // ============================================
+    // PASO 3: Procesar costos y aplicar IVA
+    // ============================================
+    const costosMap: { [fecha: string]: number } = {}
+
+    for (const dia of costsData.results) {
+      const costoSinIva = parseFloat(dia.cost) || 0
+      const costoConIva = costoSinIva * 1.21
+      costosMap[dia.date] = Math.round(costoConIva * 100) / 100
+    }
+
+    // ============================================
+    // PASO 4: Rellenar días faltantes con último valor conocido
+    // La API de ML tiene delay de ~2 días, usamos el último valor disponible
+    // ============================================
+    const fechasConDatos = Object.keys(costosMap).sort()
+
+    if (fechasConDatos.length > 0) {
+      const ultimaFechaConDatos = fechasConDatos[fechasConDatos.length - 1]
+
+      // Generar todos los días desde fechaDesde hasta hoy
+      const todasLasFechas: string[] = []
+      const fechaActual = new Date(fechaDesde)
+
+      while (fechaActual <= hoy) {
+        todasLasFechas.push(fechaActual.toISOString().split('T')[0])
+        fechaActual.setDate(fechaActual.getDate() + 1)
+      }
+
+      // Rellenar días sin datos con el último valor conocido
+      let ultimoValorConocido = 0
+      for (const fecha of todasLasFechas) {
+        if (costosMap[fecha] !== undefined) {
+          ultimoValorConocido = costosMap[fecha]
+        } else if (fecha > ultimaFechaConDatos) {
+          // Solo rellenar días POSTERIORES al último dato real
+          costosMap[fecha] = ultimoValorConocido
+          console.log(`Día ${fecha} sin datos, usando último valor: ${ultimoValorConocido}`)
+        }
+      }
+    }
+
+    // ============================================
+    // PASO 5: Guardar en Supabase (upsert)
+    // ============================================
+    let updated = 0
+
+    for (const [fecha, costo] of Object.entries(costosMap)) {
+      const { error } = await supabase
+        .from('costos_publicidad')
+        .upsert(
+          { fecha: fecha, costo_diario: costo },
+          { onConflict: 'fecha' }
+        )
+
+      if (!error) updated++
+    }
+
+    console.log(`Sincronizados ${updated} registros de costos de publicidad`)
+
+    return {
+      success: true,
+      updated,
+      fechaDesde: dateFrom,
+      fechaHasta: dateTo,
+      diasConDatosReales: costsData.results.length
+    }
+
+  } catch (error) {
+    console.error('Error en syncAds:', error)
+    return { success: false, error: (error as Error).message }
+  }
 }

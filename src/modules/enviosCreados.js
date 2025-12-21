@@ -756,25 +756,27 @@ export const moduloEnviosCreados = {
             progresoMap[p.sku] = p.cantidad_escaneada || 0;
         });
 
-        // Obtener inventory_id de cada producto desde publicaciones_meli
-        const productosConInventory = [];
-        for (const prod of envio.productos) {
-            let inventoryId = null;
-            if (prod.sku) {
-                const { data } = await supabase
-                    .from('publicaciones_meli')
-                    .select('id_inventario')
-                    .eq('sku', prod.sku)
-                    .single();
-                if (data) inventoryId = data.id_inventario;
+        // Obtener inventory_id de todos los productos en UNA sola consulta (batch)
+        const skusEnvio = envio.productos.map(p => p.sku).filter(Boolean);
+        let inventoryMap = {};
+
+        if (skusEnvio.length > 0) {
+            const { data: pubsData } = await supabase
+                .from('publicaciones_meli')
+                .select('sku, id_inventario')
+                .in('sku', skusEnvio);
+
+            if (pubsData) {
+                pubsData.forEach(p => inventoryMap[p.sku] = p.id_inventario);
             }
-            productosConInventory.push({
-                ...prod,
-                inventory_id: inventoryId,
-                // Cargar cantidad escaneada del progreso guardado si existe
-                cantidad_escaneada: progresoMap[prod.sku] || 0
-            });
         }
+
+        // Construir array con inventory_id y cantidad escaneada
+        const productosConInventory = envio.productos.map(prod => ({
+            ...prod,
+            inventory_id: inventoryMap[prod.sku] || null,
+            cantidad_escaneada: progresoMap[prod.sku] || 0
+        }));
 
         moduloEnviosCreados.productosPreparacion = productosConInventory;
         moduloEnviosCreados.cambiosPendientes = false; // Sin cambios nuevos al iniciar
