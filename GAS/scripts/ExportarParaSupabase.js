@@ -294,12 +294,15 @@ function exportarOrdenes() {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
 
+  // Mapeo de columnas de la hoja GAS a columnas de Supabase
+  // NOTA: Si tu hoja tiene columna SKU, se incluira automaticamente
   const mapeo = {
     'ID Orden': { nombre: 'id_orden', tipo: 'texto' },
     'Fecha Creación Orden': { nombre: 'fecha_creacion', tipo: 'fecha' },
     'Fecha de Pago': { nombre: 'fecha_pago', tipo: 'fecha' },
     'Estado Orden': { nombre: 'estado', tipo: 'texto' },
     'ID Item': { nombre: 'id_item', tipo: 'texto' },
+    'SKU': { nombre: 'sku', tipo: 'texto' },  // Agregado para compatibilidad
     'Titulo Item': { nombre: 'titulo_item', tipo: 'texto' },
     'Cantidad': { nombre: 'cantidad', tipo: 'entero' },
     'Precio Unitario (Lista)': { nombre: 'precio_unitario', tipo: 'numero' },

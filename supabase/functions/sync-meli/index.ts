@@ -306,8 +306,46 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
         // Saltar si ya existe
         if (existingIds.has(orderId)) continue
 
+        // Obtener fecha de pago y payment_id
+        let datePaid = null
+        let paymentId = null
+        if (order.payments && order.payments.length > 0) {
+          paymentId = order.payments[0].id
+          datePaid = order.payments[0].date_approved || order.payments[0].date_created
+        }
+
+        // ============================================
+        // OBTENER NETO RECIBIDO via /collections/{paymentId}
+        // Igual que en GAS (ApiMeli_Orders.js líneas 106-128)
+        // ============================================
+        let orderNetAmount: number | null = null
+        if (paymentId) {
+          try {
+            const collectionResponse = await fetch(
+              `${ML_API_BASE}/collections/${paymentId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            )
+
+            if (collectionResponse.ok) {
+              const collectionData = await collectionResponse.json()
+              const collectionDetails = collectionData.collection || collectionData
+
+              if (collectionDetails?.transaction_details?.net_received_amount !== undefined) {
+                orderNetAmount = collectionDetails.transaction_details.net_received_amount
+              } else if (collectionDetails?.net_received_amount !== undefined) {
+                orderNetAmount = collectionDetails.net_received_amount
+              }
+            }
+          } catch (collError) {
+            console.error(`Error obteniendo collection ${paymentId}:`, collError)
+          }
+        }
+
         // Procesar cada item de la orden
-        for (const orderItem of order.order_items || []) {
+        const orderItems = order.order_items || []
+        const orderTotalAmount = order.total_amount || 0
+
+        for (const orderItem of orderItems) {
           const itemId = orderItem.item?.id || null
 
           // Buscar SKU en múltiples lugares (igual que GAS)
@@ -336,15 +374,56 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
             }
           }
 
+          // Calcular valores para este item
+          const quantity = orderItem.quantity || 1
+          const unitPrice = orderItem.unit_price || 0
+          const totalLista = quantity * unitPrice
+
+          // ============================================
+          // Distribuir neto proporcionalmente entre items
+          // (igual que GAS líneas 150-171)
+          // ============================================
+          let itemNetAmount: number | null = null
+          let itemMeliCost: number | null = null
+          let pctCostoMeli: number | null = null
+
+          if (orderNetAmount !== null && orderTotalAmount > 0) {
+            if (orderItems.length === 1) {
+              // Un solo item: todo el neto es para él
+              itemNetAmount = orderNetAmount
+            } else {
+              // Múltiples items: distribuir proporcionalmente
+              const priceForProportion = orderItem.full_unit_price ?? unitPrice
+              const totalItemEffectivePrice = quantity * priceForProportion
+              const itemValueFraction = totalItemEffectivePrice / orderTotalAmount
+
+              if (itemValueFraction >= 0 && itemValueFraction <= 1.01) {
+                itemNetAmount = orderNetAmount * itemValueFraction
+              }
+            }
+          }
+
+          // Calcular costo de Meli y porcentaje
+          if (itemNetAmount !== null && totalLista > 0) {
+            itemMeliCost = totalLista - itemNetAmount
+            pctCostoMeli = (itemMeliCost / totalLista) * 100
+          }
+
           const orderRecord = {
             id_orden: orderId,
             id_item: itemId,
             sku: skuFromOrder,
-            titulo: orderItem.item?.title || null,
-            cantidad: orderItem.quantity || 1,
-            precio_unitario: orderItem.unit_price || 0,
-            fecha_orden: order.date_created,
-            estado_orden: order.status,
+            titulo_item: orderItem.item?.title || null,
+            cantidad: quantity,
+            precio_unitario: unitPrice,
+            total_lista: totalLista,
+            fecha_creacion: order.date_created,
+            fecha_pago: datePaid,
+            id_pago: paymentId ? String(paymentId) : null,
+            neto_recibido: itemNetAmount !== null ? Math.round(itemNetAmount * 100) / 100 : null,
+            costo_meli: itemMeliCost !== null ? Math.round(itemMeliCost * 100) / 100 : null,
+            pct_costo_meli: pctCostoMeli !== null ? Math.round(pctCostoMeli * 100) / 100 : null,
+            estado: order.status,
             comprador_nickname: order.buyer?.nickname || null
           }
 
