@@ -796,6 +796,14 @@ export const moduloCalculadora = {
             // Estructura: { sku: { ventas: { 'YYYY-MM-DD': cantidad }, titulo: '' } }
             const ventasPorSkuPorDia = {};
 
+            // Helper: formatear fecha en timezone local (como GAS Utilities.formatDate)
+            const formatearFechaLocal = (fecha) => {
+                const year = fecha.getFullYear();
+                const month = String(fecha.getMonth() + 1).padStart(2, '0');
+                const day = String(fecha.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
             ordenes.forEach(orden => {
                 // GAS usa fecha_pago (línea 69), fallback a fecha_creacion
                 const fechaOrden = orden.fecha_pago || orden.fecha_creacion;
@@ -803,7 +811,8 @@ export const moduloCalculadora = {
 
                 const sku = orden.sku;
                 const fecha = new Date(fechaOrden);
-                const fechaStr = fecha.toISOString().split('T')[0]; // 'YYYY-MM-DD'
+                // Usar timezone LOCAL como GAS (no UTC)
+                const fechaStr = formatearFechaLocal(fecha);
                 const cantidad = parseInt(orden.cantidad) || 1;
 
                 if (!ventasPorSkuPorDia[sku]) {
@@ -824,7 +833,8 @@ export const moduloCalculadora = {
                 for (let i = 0; i < DIAS_EVALUACION; i++) {
                     const fechaActual = new Date();
                     fechaActual.setDate(fechaActual.getDate() - i);
-                    const fechaStr = fechaActual.toISOString().split('T')[0];
+                    // Usar timezone LOCAL como GAS
+                    const fechaStr = formatearFechaLocal(fechaActual);
                     const ventasDelDia = ventasPorSkuPorDia[sku].ventas[fechaStr] || 0;
                     ventasDiarias.push(ventasDelDia);
                     totalUnidades += ventasDelDia;
@@ -850,6 +860,18 @@ export const moduloCalculadora = {
             }
 
             console.log(`[GAS-REPLICA] Calculado V y σ para ${Object.keys(resultados).length} SKUs`);
+
+            // DEBUG: Mostrar primeros 5 SKUs para comparar con GAS
+            const skusDebug = Object.keys(resultados).slice(0, 5);
+            console.log('=== DEBUG: Comparar estos valores con GAS ===');
+            skusDebug.forEach(sku => {
+                const r = resultados[sku];
+                console.log(`SKU: ${sku}`);
+                console.log(`  - Ventas 90d: ${r.totalUnidades}`);
+                console.log(`  - V (ventas/día): ${r.ventasDiariasPromedio.toFixed(4)}`);
+                console.log(`  - σ (desvío): ${r.desvioEstandar.toFixed(4)}`);
+            });
+            console.log('=============================================');
 
             // ========== PASO 3: Actualizar publicaciones_meli ==========
             let actualizados = 0;
