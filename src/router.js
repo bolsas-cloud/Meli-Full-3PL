@@ -2,6 +2,7 @@
 // ROUTER SPA - Navegación sin recargar página
 // ============================================
 import { moduloCalculadora } from './modules/calculadoraEnvios.js';
+import { moduloEnviosCreados } from './modules/enviosCreados.js';
 // import { moduloDashboard } from './modules/dashboard.js';
 // import { moduloStock } from './modules/stock.js';
 // import { moduloPrecios } from './modules/precios.js';
@@ -16,6 +17,7 @@ export const router = {
         const titulos = {
             'dashboard': 'Dashboard de Ventas',
             'calculadora': 'Calculadora de Envíos a Full',
+            'envios': 'Envíos Creados',
             'stock': 'Gestión de Stock',
             'precios': 'Gestión de Precios',
             'reconciliacion': 'Reconciliación 3PL'
@@ -40,6 +42,10 @@ export const router = {
         switch(ruta) {
             case 'calculadora':
                 moduloCalculadora.render(appContent);
+                break;
+
+            case 'envios':
+                moduloEnviosCreados.render(appContent);
                 break;
 
             // case 'dashboard':
