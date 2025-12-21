@@ -290,19 +290,24 @@ export const moduloEnviosCreados = {
 
                     <!-- Botones de acción -->
                     <div class="flex gap-1">
+                        <button onclick="moduloEnviosCreados.iniciarPreparacion('${envio.id_envio}')"
+                                class="p-2 ${envio.estado === 'En Preparación' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'} rounded-lg transition-colors"
+                                title="Preparar envío"
+                                ${envio.estado !== 'En Preparación' ? 'disabled' : ''}>
+                            <i class="fas fa-box-open"></i>
+                        </button>
+
                         <button onclick="moduloEnviosCreados.editarEnvio('${envio.id_envio}')"
                                 class="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
                                 title="Editar productos">
                             <i class="fas fa-edit"></i>
                         </button>
 
-                        ${envio.link_pdf ? `
-                        <a href="${envio.link_pdf}" target="_blank"
-                           class="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                           title="Ver PDF">
+                        <button onclick="moduloEnviosCreados.generarPDF('${envio.id_envio}')"
+                                class="p-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors"
+                                title="Generar PDF">
                             <i class="fas fa-file-pdf"></i>
-                        </a>
-                        ` : ''}
+                        </button>
 
                         <button onclick="moduloEnviosCreados.eliminarEnvio('${envio.id_envio}')"
                                 class="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
@@ -584,6 +589,425 @@ export const moduloEnviosCreados = {
         } catch (error) {
             console.error('Error eliminando envío:', error);
             mostrarNotificacion('Error al eliminar envío', 'error');
+        }
+    },
+
+    // ============================================
+    // GENERAR PDF: Crear PDF del envío para imprimir
+    // ============================================
+    generarPDF: (idEnvio) => {
+        const envio = enviosCache.find(e => e.id_envio === idEnvio);
+        if (!envio) {
+            mostrarNotificacion('Envío no encontrado', 'error');
+            return;
+        }
+
+        try {
+            // Usar jsPDF (ya incluido en index.html)
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            const fechaCreacion = new Date(envio.fecha_creacion);
+            const fechaColecta = envio.fecha_colecta ? new Date(envio.fecha_colecta) : null;
+
+            // Header
+            doc.setFontSize(20);
+            doc.setTextColor(78, 171, 135); // Color brand
+            doc.text('Envío a Full', 105, 20, { align: 'center' });
+
+            // Info del envío
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.text(`ID: ${envio.id_envio}`, 20, 35);
+            doc.text(`Estado: ${envio.estado}`, 120, 35);
+
+            doc.setFontSize(10);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`Fecha Creación: ${fechaCreacion.toLocaleDateString('es-AR')}`, 20, 45);
+            doc.text(`Fecha Colecta: ${fechaColecta ? fechaColecta.toLocaleDateString('es-AR') : '-'}`, 120, 45);
+
+            if (envio.id_envio_ml) {
+                doc.text(`ID ML: ${envio.id_envio_ml}`, 20, 52);
+            }
+
+            // Línea separadora
+            doc.setDrawColor(200, 200, 200);
+            doc.line(20, 58, 190, 58);
+
+            // Tabla de productos usando autoTable
+            const productosData = envio.productos.map((p, idx) => [
+                idx + 1,
+                p.sku || '-',
+                (p.titulo || '-').substring(0, 40),
+                p.cantidad_enviada || 0
+            ]);
+
+            doc.autoTable({
+                startY: 65,
+                head: [['#', 'SKU', 'Producto', 'Cantidad']],
+                body: productosData,
+                theme: 'striped',
+                headStyles: {
+                    fillColor: [78, 171, 135],
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 10, halign: 'center' },
+                    1: { cellWidth: 35 },
+                    2: { cellWidth: 100 },
+                    3: { cellWidth: 25, halign: 'center', fontStyle: 'bold' }
+                },
+                styles: {
+                    fontSize: 9,
+                    cellPadding: 3
+                }
+            });
+
+            // Totales
+            const totalBultos = envio.productos.reduce((sum, p) => sum + (p.cantidad_enviada || 0), 0);
+            const finalY = doc.lastAutoTable.finalY + 10;
+
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.text(`Total SKUs: ${envio.productos.length}`, 20, finalY);
+            doc.text(`Total Bultos: ${totalBultos}`, 120, finalY);
+
+            // Notas si existen
+            if (envio.notas) {
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text(`Notas: ${envio.notas}`, 20, finalY + 10);
+            }
+
+            // Footer
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 105, 285, { align: 'center' });
+
+            // Descargar
+            doc.save(`Envio_${envio.id_envio}.pdf`);
+            mostrarNotificacion('PDF generado correctamente', 'success');
+
+        } catch (error) {
+            console.error('Error generando PDF:', error);
+            mostrarNotificacion('Error al generar PDF', 'error');
+        }
+    },
+
+    // ============================================
+    // MODO PREPARACIÓN: Escaneo de productos
+    // ============================================
+    preparacionActiva: null,
+    productosPreparacion: [],
+    ultimoSkuFoco: null,
+
+    iniciarPreparacion: async (idEnvio) => {
+        const envio = enviosCache.find(e => e.id_envio === idEnvio);
+        if (!envio) {
+            mostrarNotificacion('Envío no encontrado', 'error');
+            return;
+        }
+
+        if (envio.estado !== 'En Preparación') {
+            mostrarNotificacion('El envío debe estar en estado "En Preparación"', 'warning');
+            return;
+        }
+
+        moduloEnviosCreados.preparacionActiva = envio;
+
+        // Obtener inventory_id de cada producto desde publicaciones_meli
+        const productosConInventory = [];
+        for (const prod of envio.productos) {
+            let inventoryId = null;
+            if (prod.sku) {
+                const { data } = await supabase
+                    .from('publicaciones_meli')
+                    .select('id_inventario')
+                    .eq('sku', prod.sku)
+                    .single();
+                if (data) inventoryId = data.id_inventario;
+            }
+            productosConInventory.push({
+                ...prod,
+                inventory_id: inventoryId,
+                cantidad_escaneada: 0
+            });
+        }
+
+        moduloEnviosCreados.productosPreparacion = productosConInventory;
+
+        // Mostrar UI de preparación
+        const contenedor = document.getElementById('app-content');
+        contenedor.innerHTML = `
+            <div class="max-w-5xl mx-auto space-y-4">
+                <!-- Header -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-800">
+                                <i class="fas fa-box-open text-yellow-500 mr-2"></i>
+                                Preparando: ${envio.id_envio}
+                            </h3>
+                            <p class="text-sm text-gray-500">Escanea los productos o usa los botones +/-</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="moduloEnviosCreados.cancelarPreparacion()"
+                                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                <i class="fas fa-times mr-1"></i>Cancelar
+                            </button>
+                            <button onclick="moduloEnviosCreados.finalizarPreparacion()"
+                                    class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors">
+                                <i class="fas fa-check-circle mr-1"></i>Finalizar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Área de foco/escaneo -->
+                <div id="foco-escaneo" class="bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl p-6 text-center transition-all">
+                    <div id="foco-titulo" class="text-xl font-bold text-gray-500">Esperando escaneo...</div>
+                    <div class="text-sm text-gray-400 mt-2">
+                        <span id="foco-sku">SKU: -</span> | <span id="foco-inventory">Inventory ID: -</span>
+                    </div>
+                    <div id="foco-contador" class="text-2xl font-bold text-gray-700 mt-2"></div>
+                </div>
+
+                <!-- Input de escaneo -->
+                <div class="flex items-center gap-2">
+                    <button onclick="moduloEnviosCreados.ajustarCantidad(-1)"
+                            class="w-12 h-12 bg-red-100 text-red-700 rounded-lg text-xl font-bold hover:bg-red-200 transition-colors"
+                            id="btn-restar">-</button>
+                    <input type="text" id="input-escaner"
+                           class="flex-1 border-2 border-gray-300 rounded-lg px-4 py-3 text-center text-lg focus:border-brand focus:ring-2 focus:ring-brand/20"
+                           placeholder="[ Escanea un código o escribe SKU/Inventory ID ]"
+                           autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){moduloEnviosCreados.procesarEscaneo(this.value);this.value='';}">
+                    <button onclick="moduloEnviosCreados.ajustarCantidad(1)"
+                            class="w-12 h-12 bg-green-100 text-green-700 rounded-lg text-xl font-bold hover:bg-green-200 transition-colors"
+                            id="btn-sumar">+</button>
+                </div>
+
+                <!-- Tabla de productos -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <table class="w-full">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU / Título</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Inventory ID</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">A Enviar</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Escaneados</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-preparacion">
+                            ${moduloEnviosCreados.renderFilasPreparacion()}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Resumen -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex justify-between items-center">
+                    <div class="text-sm text-gray-600">
+                        <span class="font-bold text-gray-800" id="resumen-completados">0</span> de
+                        <span class="font-bold">${productosConInventory.length}</span> productos completados
+                    </div>
+                    <div class="text-sm">
+                        <span class="px-3 py-1 rounded-full bg-green-100 text-green-800 font-bold" id="resumen-bultos">
+                            0 / ${envio.totalBultos} bultos
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Enfocar input
+        setTimeout(() => {
+            document.getElementById('input-escaner')?.focus();
+        }, 100);
+    },
+
+    renderFilasPreparacion: () => {
+        return moduloEnviosCreados.productosPreparacion.map((p, idx) => {
+            const escaneados = p.cantidad_escaneada || 0;
+            const requeridos = p.cantidad_enviada || 0;
+            let estadoClase = 'bg-gray-100 text-gray-600';
+            let estadoTexto = 'Pendiente';
+
+            if (escaneados >= requeridos) {
+                estadoClase = 'bg-green-100 text-green-700';
+                estadoTexto = 'Completado';
+            } else if (escaneados > 0) {
+                estadoClase = 'bg-yellow-100 text-yellow-700';
+                estadoTexto = 'En Progreso';
+            }
+
+            return `
+                <tr class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                    data-idx="${idx}"
+                    onclick="moduloEnviosCreados.seleccionarProducto(${idx})">
+                    <td class="px-4 py-3">
+                        <div class="font-medium text-gray-800">${p.sku || '-'}</div>
+                        <div class="text-xs text-gray-500 truncate max-w-xs">${p.titulo || '-'}</div>
+                    </td>
+                    <td class="px-4 py-3 text-center text-sm font-mono text-gray-600">${p.inventory_id || '-'}</td>
+                    <td class="px-4 py-3 text-center font-bold text-gray-800">${requeridos}</td>
+                    <td class="px-4 py-3 text-center font-bold text-lg ${escaneados >= requeridos ? 'text-green-600' : 'text-gray-800'}">${escaneados}</td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="px-2 py-1 rounded-full text-xs font-bold ${estadoClase}">${estadoTexto}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    procesarEscaneo: (codigo) => {
+        if (!codigo || !codigo.trim()) return;
+        codigo = codigo.trim().toUpperCase();
+
+        // Buscar por inventory_id o SKU
+        const idx = moduloEnviosCreados.productosPreparacion.findIndex(p =>
+            (p.inventory_id && p.inventory_id.toUpperCase() === codigo) ||
+            (p.sku && p.sku.toUpperCase() === codigo)
+        );
+
+        if (idx === -1) {
+            mostrarNotificacion('Producto no encontrado en este envío', 'warning');
+            return;
+        }
+
+        const prod = moduloEnviosCreados.productosPreparacion[idx];
+        prod.cantidad_escaneada = (prod.cantidad_escaneada || 0) + 1;
+        moduloEnviosCreados.ultimoSkuFoco = prod.sku;
+
+        moduloEnviosCreados.actualizarUIPreparacion(idx);
+        document.getElementById('input-escaner').value = '';
+        document.getElementById('input-escaner').focus();
+    },
+
+    seleccionarProducto: (idx) => {
+        const prod = moduloEnviosCreados.productosPreparacion[idx];
+        moduloEnviosCreados.ultimoSkuFoco = prod.sku;
+        moduloEnviosCreados.actualizarFoco(prod);
+    },
+
+    ajustarCantidad: (delta) => {
+        if (!moduloEnviosCreados.ultimoSkuFoco) {
+            mostrarNotificacion('Escanea un producto primero', 'info');
+            return;
+        }
+
+        const idx = moduloEnviosCreados.productosPreparacion.findIndex(
+            p => p.sku === moduloEnviosCreados.ultimoSkuFoco
+        );
+
+        if (idx === -1) return;
+
+        const prod = moduloEnviosCreados.productosPreparacion[idx];
+        prod.cantidad_escaneada = Math.max(0, (prod.cantidad_escaneada || 0) + delta);
+
+        moduloEnviosCreados.actualizarUIPreparacion(idx);
+    },
+
+    actualizarUIPreparacion: (idxActualizado) => {
+        // Actualizar tabla
+        document.getElementById('tabla-preparacion').innerHTML = moduloEnviosCreados.renderFilasPreparacion();
+
+        // Actualizar foco
+        const prod = moduloEnviosCreados.productosPreparacion[idxActualizado];
+        moduloEnviosCreados.actualizarFoco(prod);
+
+        // Actualizar resumen
+        const completados = moduloEnviosCreados.productosPreparacion.filter(
+            p => (p.cantidad_escaneada || 0) >= (p.cantidad_enviada || 0)
+        ).length;
+        const totalEscaneados = moduloEnviosCreados.productosPreparacion.reduce(
+            (sum, p) => sum + (p.cantidad_escaneada || 0), 0
+        );
+        const totalRequeridos = moduloEnviosCreados.productosPreparacion.reduce(
+            (sum, p) => sum + (p.cantidad_enviada || 0), 0
+        );
+
+        document.getElementById('resumen-completados').textContent = completados;
+        document.getElementById('resumen-bultos').textContent = `${totalEscaneados} / ${totalRequeridos} bultos`;
+    },
+
+    actualizarFoco: (prod) => {
+        const foco = document.getElementById('foco-escaneo');
+        const escaneados = prod.cantidad_escaneada || 0;
+        const requeridos = prod.cantidad_enviada || 0;
+
+        foco.className = escaneados >= requeridos
+            ? 'bg-green-50 border-2 border-green-400 rounded-xl p-6 text-center transition-all'
+            : 'bg-blue-50 border-2 border-blue-400 rounded-xl p-6 text-center transition-all';
+
+        document.getElementById('foco-titulo').textContent = prod.titulo || prod.sku;
+        document.getElementById('foco-titulo').className = `text-xl font-bold ${escaneados >= requeridos ? 'text-green-700' : 'text-blue-700'}`;
+        document.getElementById('foco-sku').textContent = `SKU: ${prod.sku || '-'}`;
+        document.getElementById('foco-inventory').textContent = `Inventory ID: ${prod.inventory_id || '-'}`;
+        document.getElementById('foco-contador').innerHTML = `<span class="${escaneados >= requeridos ? 'text-green-600' : 'text-blue-600'}">${escaneados}</span> / ${requeridos}`;
+    },
+
+    cancelarPreparacion: async () => {
+        const confirmado = await confirmarAccion(
+            'Cancelar preparación',
+            '¿Seguro que querés cancelar? Se perderá el progreso de escaneo.',
+            'warning',
+            'Sí, Cancelar'
+        );
+
+        if (!confirmado) return;
+
+        moduloEnviosCreados.preparacionActiva = null;
+        moduloEnviosCreados.productosPreparacion = [];
+        moduloEnviosCreados.ultimoSkuFoco = null;
+
+        // Volver a la lista
+        const contenedor = document.getElementById('app-content');
+        await moduloEnviosCreados.render(contenedor);
+    },
+
+    finalizarPreparacion: async () => {
+        const envio = moduloEnviosCreados.preparacionActiva;
+        if (!envio) return;
+
+        // Verificar si está todo completo
+        const todosCompletos = moduloEnviosCreados.productosPreparacion.every(
+            p => (p.cantidad_escaneada || 0) >= (p.cantidad_enviada || 0)
+        );
+
+        if (!todosCompletos) {
+            const continuar = await confirmarAccion(
+                'Preparación incompleta',
+                'No todos los productos están completos. ¿Querés finalizar igual?',
+                'warning',
+                'Sí, Finalizar'
+            );
+            if (!continuar) return;
+        }
+
+        try {
+            // Cambiar estado a "Despachado"
+            const { error } = await supabase
+                .from('registro_envios_full')
+                .update({ estado: 'Despachado' })
+                .eq('id_envio', envio.id_envio);
+
+            if (error) throw error;
+
+            mostrarNotificacion('Preparación finalizada. Envío marcado como Despachado.', 'success');
+
+            moduloEnviosCreados.preparacionActiva = null;
+            moduloEnviosCreados.productosPreparacion = [];
+            moduloEnviosCreados.ultimoSkuFoco = null;
+
+            // Volver a la lista
+            const contenedor = document.getElementById('app-content');
+            await moduloEnviosCreados.render(contenedor);
+
+        } catch (error) {
+            console.error('Error finalizando preparación:', error);
+            mostrarNotificacion('Error al finalizar preparación', 'error');
         }
     }
 };
