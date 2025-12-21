@@ -793,23 +793,40 @@ export const moduloCalculadora = {
             console.log(`[GAS-REPLICA] Mapa ItemID→SKU creado con ${Object.keys(itemSkuMap).length} productos`);
 
             // GAS usa fecha_pago (Logistica_Full.js línea 69)
-            // Usamos COALESCE para fallback a fecha_creacion si fecha_pago es null
-            const { data: ordenes, error } = await supabase
-                .from('ordenes_meli')
-                .select('sku, cantidad, fecha_pago, fecha_creacion, id_item')
-                .or(`fecha_pago.gte.${fechaDesde.toISOString()},and(fecha_pago.is.null,fecha_creacion.gte.${fechaDesde.toISOString()})`);
+            // Paginación para obtener TODAS las órdenes (Supabase limita a 1000 por default)
+            const BATCH_SIZE = 1000;
+            let ordenes = [];
+            let offset = 0;
+            let hasMore = true;
 
-            if (error) {
-                console.error('Error consultando órdenes:', error);
-                return {};
+            while (hasMore) {
+                const { data: batch, error } = await supabase
+                    .from('ordenes_meli')
+                    .select('sku, cantidad, fecha_pago, fecha_creacion, id_item')
+                    .or(`fecha_pago.gte.${fechaDesde.toISOString()},and(fecha_pago.is.null,fecha_creacion.gte.${fechaDesde.toISOString()})`)
+                    .range(offset, offset + BATCH_SIZE - 1);
+
+                if (error) {
+                    console.error('Error consultando órdenes:', error);
+                    return {};
+                }
+
+                if (batch && batch.length > 0) {
+                    ordenes = ordenes.concat(batch);
+                    offset += BATCH_SIZE;
+                    hasMore = batch.length === BATCH_SIZE;
+                    console.log(`[GAS-REPLICA] Cargadas ${ordenes.length} órdenes...`);
+                } else {
+                    hasMore = false;
+                }
             }
 
-            if (!ordenes || ordenes.length === 0) {
+            if (ordenes.length === 0) {
                 console.log('No hay órdenes en los últimos 90 días');
                 return {};
             }
 
-            console.log(`[GAS-REPLICA] Procesando ${ordenes.length} órdenes (${DIAS_EVALUACION} días)...`);
+            console.log(`[GAS-REPLICA] Total: ${ordenes.length} órdenes (${DIAS_EVALUACION} días)`);
 
             // ========== PASO 1: Agrupar por SKU y por DÍA (igual que GAS líneas 64-84) ==========
             // Estructura: { sku: { ventas: { 'YYYY-MM-DD': cantidad }, titulo: '' } }
