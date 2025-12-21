@@ -428,13 +428,24 @@ export const moduloCalculadora = {
         const diasHastaColecta = Math.max(0, Math.ceil((fechaColecta - hoy) / (1000 * 60 * 60 * 24)));
 
         console.log(`Días hasta colecta: ${diasHastaColecta}`);
+        console.log(`Calculando sugerencias para ${productos.length} productos...`);
 
         return productos.map(p => {
-            // Calcular ventas diarias desde ventas_90d si no está calculado
-            const V = p.ventas_dia || (p.ventas_90d ? p.ventas_90d / DIAS_PERIODO : 0);
-            const stockFull = p.stock_full || 0;
-            const stockTransito = p.stock_transito || 0;
-            const sigma = p.desviacion || (V * 0.3); // Usar 30% como estimación si no hay datos
+            // Convertir a números explícitamente
+            const ventasDiaDB = parseFloat(p.ventas_dia) || 0;
+            const ventas90dDB = parseFloat(p.ventas_90d) || 0;
+
+            // Si ventas_dia está en 0, usar ventas_90d / 90
+            const V = ventasDiaDB > 0 ? ventasDiaDB : (ventas90dDB / DIAS_PERIODO);
+
+            const stockFull = parseInt(p.stock_full) || 0;
+            const stockTransito = parseInt(p.stock_transito) || 0;
+            const sigma = parseFloat(p.desviacion) || (V * 0.3); // Usar 30% como estimación si no hay datos
+
+            // Debug para los primeros productos
+            if (productos.indexOf(p) < 3) {
+                console.log(`[${p.sku}] ventasDiaDB=${ventasDiaDB}, ventas90dDB=${ventas90dDB}, V=${V.toFixed(2)}, stockFull=${stockFull}`);
+            }
 
             // Lead Time total = Tiempo Tránsito + Frecuencia de Envío
             const L = Tt + Fe;
