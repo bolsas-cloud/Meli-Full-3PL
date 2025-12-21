@@ -152,13 +152,13 @@ export const moduloCalculadora = {
                                         <input type="checkbox" id="check-all" onchange="moduloCalculadora.toggleAll(this)">
                                     </th>
                                     <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ventas/Día</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">En Tránsito</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" title="Stock estimado en fecha de colecta">Stock Proy.</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Días Cob.</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cantidad a Enviar</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" title="Stock de Seguridad">Stock Seg.</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cobertura</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">A ENVIAR</th>
                                     <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Riesgo</th>
                                 </tr>
                             </thead>
@@ -383,111 +383,105 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // CALCULAR JS: Fallback si RPC no está disponible
-    // Fórmula basada en fecha de colecta (igual que GAS):
-    // - diasHastaColecta = días desde hoy hasta fecha colecta
+    // CALCULAR JS: Réplica EXACTA de GAS (Logistica_Full.js)
+    // Fórmulas de Logistica_Full.js líneas 251-286:
+    // - L = Fe + Tt
     // - consumoProyectado = V × diasHastaColecta
-    // - stockProyectadoEnColecta = (stockFull + enTransito) - consumoProyectado
-    // - cantidadAEnviar = (V × L) + Ss - stockProyectadoEnColecta
+    // - stockProyectadoEnColecta = (Sml + enTransito) - consumoProyectado
+    // - Ss = Z × σ × √L
+    // - cantidadNecesaria = (V × L) + Ss
+    // - cantidadAEnviar = cantidadNecesaria - stockProyectadoEnColecta
+    // - coberturaActual = Sml / V (o Infinity si V=0)
+    // - Riesgo: Normal, RIESGO, CRÍTICO
     // ============================================
     calcularSugerenciasJS: (productos, Tt, Fe, Z, incremento, fechaColecta) => {
-        const DIAS_PERIODO = 90; // Período para calcular ventas diarias
+        const DIAS_PERIODO = 90;
 
-        // Calcular días hasta la colecta
+        // Calcular días hasta la colecta (igual que GAS)
         const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const diasHastaColecta = Math.max(0, Math.ceil((fechaColecta - hoy) / (1000 * 60 * 60 * 24)));
+        const hoyUTC = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()));
+        const fechaColectaUTC = new Date(Date.UTC(
+            fechaColecta.getFullYear(),
+            fechaColecta.getMonth(),
+            fechaColecta.getDate()
+        ));
+        const diasHastaColecta = Math.max(0, (fechaColectaUTC - hoyUTC) / (1000 * 60 * 60 * 24));
 
-        console.log(`Días hasta colecta: ${diasHastaColecta}`);
-        console.log(`Calculando sugerencias para ${productos.length} productos...`);
+        // Lead Time total (igual que GAS línea 243)
+        const L = Fe + Tt;
 
-        return productos.map(p => {
-            // Convertir a números explícitamente
+        console.log(`[GAS-REPLICA] Tt=${Tt}, Fe=${Fe}, L=${L}, Z=${Z}, diasHastaColecta=${diasHastaColecta}`);
+        console.log(`[GAS-REPLICA] Calculando sugerencias para ${productos.length} productos...`);
+
+        const sugerencias = [];
+
+        for (const p of productos) {
+            // Obtener ventas diarias (V) y desvío estándar (sigma)
             const ventasDiaDB = parseFloat(p.ventas_dia) || 0;
             const ventas90dDB = parseFloat(p.ventas_90d) || 0;
 
-            // Si ventas_dia está en 0, usar ventas_90d / 90
+            // Igual que GAS: usa ventas_dia si existe, sino calcula desde ventas_90d
             const V = ventasDiaDB > 0 ? ventasDiaDB : (ventas90dDB / DIAS_PERIODO);
+            const sigma = parseFloat(p.desviacion) || (V * 0.3);
 
-            const stockFull = parseInt(p.stock_full) || 0;
-            const stockTransito = parseInt(p.stock_transito) || 0;
-            const sigma = parseFloat(p.desviacion) || (V * 0.3); // Usar 30% como estimación si no hay datos
+            // Solo procesar si V >= 0 (GAS línea 256: "if (V >= 0)")
+            if (V >= 0) {
+                const Sml = parseInt(p.stock_full) || 0;      // Stock en Full
+                const enTransito = parseInt(p.stock_transito) || 0;
 
-            // Debug para los primeros productos
-            if (productos.indexOf(p) < 3) {
-                console.log(`[${p.sku}] ventasDiaDB=${ventasDiaDB}, ventas90dDB=${ventas90dDB}, V=${V.toFixed(2)}, stockFull=${stockFull}`);
-            }
+                // ========== FÓRMULAS EXACTAS DE GAS (líneas 260-266) ==========
+                // Consumo proyectado hasta la fecha de colecta
+                const consumoProyectado = V * diasHastaColecta;
 
-            // Lead Time total = Tiempo Tránsito + Frecuencia de Envío
-            const L = Tt + Fe;
+                // Stock proyectado en el momento de la colecta
+                const stockProyectadoEnColecta = (Sml + enTransito) - consumoProyectado;
 
-            // Stock de Seguridad: Ss = Z × σ × √L
-            let Ss = Z * sigma * Math.sqrt(L);
+                // Stock de Seguridad: Ss = Z × σ × √L
+                const Ss = Z * sigma * Math.sqrt(L);
 
-            // Aplicar incremento por evento
-            const factorEvento = 1 + (incremento / 100);
-            if (incremento > 0) {
-                Ss = Ss * factorEvento;
-            }
+                // Cantidad necesaria para cubrir el período de reposición
+                const cantidadNecesaria = (V * L) + Ss;
 
-            // ========== CÁLCULO BASADO EN FECHA DE COLECTA ==========
-            // Consumo proyectado hasta la fecha de colecta
-            const consumoProyectado = V * diasHastaColecta * factorEvento;
+                // Cantidad a enviar
+                let cantidadAEnviar = Math.ceil(cantidadNecesaria - stockProyectadoEnColecta);
+                if (cantidadAEnviar < 0) { cantidadAEnviar = 0; }
 
-            // Stock proyectado en el momento de la colecta
-            // (lo que tendremos en Full cuando venga el camión a recoger)
-            const stockProyectadoEnColecta = (stockFull + stockTransito) - consumoProyectado;
+                // ========== COBERTURA Y RIESGO (líneas 268-273) ==========
+                const coberturaActual = (V > 0) ? Sml / V : Infinity;
 
-            // Demanda esperada durante el período de reposición (después de colecta)
-            const demandaPeriodo = V * L * factorEvento;
-
-            // Cantidad a enviar: lo que necesitamos - lo que tendremos
-            // Q* = (V × L) + Ss - stockProyectadoEnColecta
-            const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
-
-            // Días de cobertura actual (sin considerar tránsito)
-            // GAS: const coberturaActual = (V > 0) ? Sml / V : Infinity;
-            const diasCobertura = V > 0 ? stockFull / V : Infinity;
-
-            // Nivel de riesgo basado en cobertura vs Lead Time + días hasta colecta
-            // Igual que GAS (Logistica_Full.js líneas 269-273)
-            let nivelRiesgo = 'OK';
-            if (V > 0) {
-                // Solo calculamos riesgo para productos con ventas
-                // CRÍTICO: cobertura < tiempo_transito + días_hasta_colecta
-                // RIESGO/BAJO: cobertura < lead_time_total + días_hasta_colecta
-                if (diasCobertura < (Tt + diasHastaColecta)) {
-                    nivelRiesgo = 'CRÍTICO';
-                } else if (diasCobertura < (L + diasHastaColecta)) {
-                    nivelRiesgo = 'BAJO';
-                } else if (diasCobertura < L * 2) {
-                    nivelRiesgo = 'NORMAL';
+                // Nivel de riesgo (igual que GAS)
+                let nivelRiesgo = "Normal";
+                if (V > 0) {
+                    // Solo calculamos riesgo para productos con ventas
+                    if (coberturaActual < (L + diasHastaColecta)) { nivelRiesgo = "RIESGO"; }
+                    if (coberturaActual < (Tt + diasHastaColecta)) { nivelRiesgo = "CRÍTICO"; }
                 }
-            }
-            // Si V = 0 (sin ventas), el riesgo es 'OK' (Normal en GAS)
 
-            return {
-                id_publicacion: p.id_publicacion,  // Clave única (MLA...)
-                sku: p.sku,                        // Puede repetirse
-                titulo: p.titulo,
-                ventas_dia: V,
-                stock_actual_full: stockFull,
-                stock_en_transito: stockTransito,
-                stock_proyectado: Math.round(stockProyectadoEnColecta * 10) / 10,
-                stock_seguridad: Math.ceil(Ss),
-                dias_cobertura: diasCobertura,
-                cantidad_a_enviar: Math.max(0, cantidadIdeal),
-                nivel_riesgo: nivelRiesgo,
-                id_inventario: p.id_inventario
-            };
-        }).sort((a, b) => {
-            // Ordenar: CRÍTICO primero, luego por cantidad a enviar
-            const ordenRiesgo = { 'CRÍTICO': 0, 'BAJO': 1, 'NORMAL': 2, 'OK': 3 };
-            if (ordenRiesgo[a.nivel_riesgo] !== ordenRiesgo[b.nivel_riesgo]) {
-                return ordenRiesgo[a.nivel_riesgo] - ordenRiesgo[b.nivel_riesgo];
+                // Debug para primeros productos
+                if (sugerencias.length < 3) {
+                    console.log(`[${p.sku}] V=${V.toFixed(2)}, Sml=${Sml}, enTransito=${enTransito}, Ss=${Ss.toFixed(1)}, cobertura=${coberturaActual.toFixed(1)}, aEnviar=${cantidadAEnviar}, riesgo=${nivelRiesgo}`);
+                }
+
+                sugerencias.push({
+                    id_publicacion: p.id_publicacion,
+                    sku: p.sku,
+                    titulo: p.titulo,
+                    ventas_dia: V,                           // Columna 3: V
+                    stock_actual_full: Sml,                  // Columna 4: Stock Full
+                    stock_en_transito: enTransito,           // Columna 5: En Tránsito
+                    stock_seguridad: Math.ceil(Ss),          // Columna 6: Stock Seg.
+                    dias_cobertura: coberturaActual,         // Columna 7: Cobertura
+                    cantidad_a_enviar: cantidadAEnviar,      // Columna 8: A ENVIAR
+                    nivel_riesgo: nivelRiesgo,               // Columna 9: Riesgo
+                    id_inventario: p.id_inventario
+                });
             }
-            return b.cantidad_a_enviar - a.cantidad_a_enviar;
-        });
+        }
+
+        // Ordenar por CANTIDAD A ENVIAR descendente (igual que GAS línea 294)
+        sugerencias.sort((a, b) => b.cantidad_a_enviar - a.cantidad_a_enviar);
+
+        return sugerencias;
     },
 
     // ============================================
@@ -508,10 +502,9 @@ export const moduloCalculadora = {
         }
 
         // Usar id_publicacion como clave única (fallback a sku para datos demo)
+        // Columnas igual que GAS: SKU, Título, V, Stock Full, En Tránsito, Stock Seg., Cobertura, A ENVIAR, Riesgo
         tbody.innerHTML = sugerencias.map(s => {
             const key = s.id_publicacion || s.sku;
-            const stockProy = s.stock_proyectado ?? 0;
-            const stockProyClass = stockProy < 0 ? 'text-red-600 font-bold' : (stockProy < (s.stock_seguridad || 0) ? 'text-yellow-600' : 'text-gray-600');
             return `
             <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(key) ? 'bg-brand-light' : ''}">
                 <td class="px-4 py-3">
@@ -526,9 +519,9 @@ export const moduloCalculadora = {
                 <td class="px-4 py-3 text-right font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
                 <td class="px-4 py-3 text-right">${s.stock_actual_full || 0}</td>
                 <td class="px-4 py-3 text-right text-gray-500">${s.stock_en_transito || 0}</td>
-                <td class="px-4 py-3 text-right ${stockProyClass}" title="Stock estimado en fecha de colecta">${stockProy}</td>
+                <td class="px-4 py-3 text-right">${s.stock_seguridad || 0}</td>
                 <td class="px-4 py-3 text-right">
-                    <span class="${(s.dias_cobertura || 0) < 3 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
+                    <span class="${(s.dias_cobertura || 0) < 7 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
                         ${s.dias_cobertura === Infinity ? '∞' : (s.dias_cobertura || 0).toFixed(1)}
                     </span>
                 </td>
@@ -553,16 +546,17 @@ export const moduloCalculadora = {
     // ============================================
     actualizarStats: async () => {
         // Si ya tenemos sugerencias calculadas, usarlas
+        // Niveles de riesgo GAS: "Normal", "RIESGO", "CRÍTICO"
         if (sugerencias.length > 0) {
             const total = sugerencias.length;
             const criticos = sugerencias.filter(s => s.nivel_riesgo === 'CRÍTICO').length;
-            const bajos = sugerencias.filter(s => s.nivel_riesgo === 'BAJO').length;
-            const ok = sugerencias.filter(s => s.nivel_riesgo === 'OK').length;
+            const riesgo = sugerencias.filter(s => s.nivel_riesgo === 'RIESGO').length;
+            const normal = sugerencias.filter(s => s.nivel_riesgo === 'Normal').length;
 
             document.getElementById('stat-total').textContent = total;
             document.getElementById('stat-criticos').textContent = criticos;
-            document.getElementById('stat-bajos').textContent = bajos;
-            document.getElementById('stat-ok').textContent = ok;
+            document.getElementById('stat-bajos').textContent = riesgo;  // "RIESGO" en GAS
+            document.getElementById('stat-ok').textContent = normal;    // "Normal" en GAS
             return;
         }
 
@@ -700,7 +694,7 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // DEMO: Generar datos de ejemplo
+    // DEMO: Generar datos de ejemplo (fórmulas GAS exactas)
     // ============================================
     generarDatosDemo: (Tt, Fe, Z, incremento, fechaColecta) => {
         // Datos de ejemplo para desarrollo
@@ -712,55 +706,59 @@ export const moduloCalculadora = {
             { sku: 'LAC303500XACRC005', titulo: 'Bolsa Lienzo 30x35 x5 Un', ventas_dia: 4.5, stock_actual_full: 3 }
         ];
 
-        // Calcular días hasta la colecta
+        // Calcular días hasta la colecta (igual que GAS)
         const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const diasHastaColecta = fechaColecta ? Math.max(0, Math.ceil((fechaColecta - hoy) / (1000 * 60 * 60 * 24))) : 0;
-        const factorEvento = 1 + (incremento / 100);
-        const L = Tt + Fe;
+        const hoyUTC = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()));
+        const fechaColectaUTC = fechaColecta ? new Date(Date.UTC(
+            fechaColecta.getFullYear(),
+            fechaColecta.getMonth(),
+            fechaColecta.getDate()
+        )) : hoyUTC;
+        const diasHastaColecta = Math.max(0, (fechaColectaUTC - hoyUTC) / (1000 * 60 * 60 * 24));
 
-        return productos.map(p => {
+        // Lead Time = Fe + Tt (igual que GAS)
+        const L = Fe + Tt;
+
+        const sugerencias = productos.map(p => {
             const V = p.ventas_dia;
-            const sigma = V * 0.3;
-            const Ss = Z * sigma * Math.sqrt(L) * factorEvento;
+            const Sml = p.stock_actual_full;
+            const enTransito = 0;
+            const sigma = V * 0.3; // Estimación si no hay datos
 
-            // Consumo proyectado hasta la colecta
-            const consumoProyectado = V * diasHastaColecta * factorEvento;
-            const stockProyectadoEnColecta = p.stock_actual_full - consumoProyectado;
+            // ========== FÓRMULAS EXACTAS DE GAS ==========
+            const consumoProyectado = V * diasHastaColecta;
+            const stockProyectadoEnColecta = (Sml + enTransito) - consumoProyectado;
+            const Ss = Z * sigma * Math.sqrt(L);
+            const cantidadNecesaria = (V * L) + Ss;
+            let cantidadAEnviar = Math.ceil(cantidadNecesaria - stockProyectadoEnColecta);
+            if (cantidadAEnviar < 0) { cantidadAEnviar = 0; }
 
-            // Demanda durante período de reposición
-            const demandaPeriodo = V * L * factorEvento;
-            const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
-            // Días de cobertura (igual que la función principal)
-            const diasCobertura = V > 0 ? p.stock_actual_full / V : Infinity;
+            const coberturaActual = (V > 0) ? Sml / V : Infinity;
 
-            // Lógica de riesgo igual que GAS
-            let nivelRiesgo = 'OK';
+            // Nivel de riesgo (igual que GAS)
+            let nivelRiesgo = "Normal";
             if (V > 0) {
-                if (diasCobertura < (Tt + diasHastaColecta)) nivelRiesgo = 'CRÍTICO';
-                else if (diasCobertura < (L + diasHastaColecta)) nivelRiesgo = 'BAJO';
-                else if (diasCobertura < L * 2) nivelRiesgo = 'NORMAL';
+                if (coberturaActual < (L + diasHastaColecta)) { nivelRiesgo = "RIESGO"; }
+                if (coberturaActual < (Tt + diasHastaColecta)) { nivelRiesgo = "CRÍTICO"; }
             }
 
             return {
                 sku: p.sku,
                 titulo: p.titulo,
                 ventas_dia: V,
-                stock_actual_full: p.stock_actual_full,
-                stock_en_transito: 0,
-                stock_proyectado: Math.round(stockProyectadoEnColecta * 10) / 10,
+                stock_actual_full: Sml,
+                stock_en_transito: enTransito,
                 stock_seguridad: Math.ceil(Ss),
-                dias_cobertura: diasCobertura,
-                cantidad_a_enviar: Math.max(0, cantidadIdeal),
+                dias_cobertura: coberturaActual,
+                cantidad_a_enviar: cantidadAEnviar,
                 nivel_riesgo: nivelRiesgo
             };
-        }).sort((a, b) => {
-            const ordenRiesgo = { 'CRÍTICO': 0, 'BAJO': 1, 'NORMAL': 2, 'OK': 3 };
-            if (ordenRiesgo[a.nivel_riesgo] !== ordenRiesgo[b.nivel_riesgo]) {
-                return ordenRiesgo[a.nivel_riesgo] - ordenRiesgo[b.nivel_riesgo];
-            }
-            return b.cantidad_a_enviar - a.cantidad_a_enviar;
         });
+
+        // Ordenar por cantidad a enviar descendente (igual que GAS)
+        sugerencias.sort((a, b) => b.cantidad_a_enviar - a.cantidad_a_enviar);
+
+        return sugerencias;
     },
 
     // ============================================

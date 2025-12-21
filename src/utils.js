@@ -160,14 +160,19 @@ export function parsearMoneda(valor) {
 
 /**
  * Calcula el color de riesgo para stock
- * @param {string} nivel - 'CRÍTICO', 'BAJO', 'OK'
+ * Niveles GAS: 'CRÍTICO', 'RIESGO', 'Normal'
+ * @param {string} nivel
  * @returns {string} - Clase CSS de color
  */
 export function colorRiesgo(nivel) {
     const colores = {
         'CRÍTICO': 'bg-red-100 text-red-800',
+        'RIESGO': 'bg-yellow-100 text-yellow-800',
+        'Normal': 'bg-green-100 text-green-800',
+        // Mantener compatibilidad con valores anteriores
         'BAJO': 'bg-yellow-100 text-yellow-800',
-        'OK': 'bg-green-100 text-green-800'
+        'OK': 'bg-green-100 text-green-800',
+        'NORMAL': 'bg-blue-100 text-blue-800'
     };
     return colores[nivel] || 'bg-gray-100 text-gray-800';
 }
