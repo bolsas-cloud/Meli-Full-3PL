@@ -245,13 +245,46 @@ export const moduloCalculadora = {
 
     // ============================================
     // CALCULAR: Sugerencias de envío (preferencia: RPC en DB)
+    // Flujo: 1) Sincronizar ML → 2) Calcular
     // ============================================
     calcular: async () => {
         const tbody = document.getElementById('tabla-sugerencias');
+
+        // Leer fecha de colecta primero
+        const fechaColectaStr = document.getElementById('param-fecha-colecta').value;
+
+        // Validar fecha de colecta
+        if (!fechaColectaStr) {
+            mostrarNotificacion('Selecciona una fecha de colecta para calcular', 'warning');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="10" class="px-4 py-8 text-center text-yellow-600">
+                        <i class="fas fa-calendar-alt fa-2x mb-2"></i>
+                        <p>Selecciona una fecha de colecta programada</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        // ========== PASO 1: Sincronizar datos desde ML ==========
         tbody.innerHTML = `
             <tr>
                 <td colspan="10" class="px-4 py-8 text-center text-gray-400">
-                    <i class="fas fa-circle-notch fa-spin fa-2x mb-2"></i>
+                    <i class="fas fa-sync-alt fa-spin fa-2x mb-2"></i>
+                    <p>Sincronizando datos con Mercado Libre...</p>
+                </td>
+            </tr>
+        `;
+
+        // Sincronizar (silencioso - no bloquea si falla)
+        await moduloCalculadora.sincronizarDesdeML(true);
+
+        // ========== PASO 2: Calcular sugerencias ==========
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                    <i class="fas fa-calculator fa-spin fa-2x mb-2"></i>
                     <p>Calculando sugerencias...</p>
                 </td>
             </tr>
@@ -263,23 +296,6 @@ export const moduloCalculadora = {
             const Fe = parseInt(document.getElementById('param-frecuencia').value) || 7;
             const Z = parseFloat(document.getElementById('param-servicio').value) || 1.65;
             const incremento = parseFloat(document.getElementById('param-evento').value) || 0;
-
-            // Leer fecha de colecta
-            const fechaColectaStr = document.getElementById('param-fecha-colecta').value;
-
-            // Validar fecha de colecta
-            if (!fechaColectaStr) {
-                mostrarNotificacion('Selecciona una fecha de colecta para calcular', 'warning');
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="px-4 py-8 text-center text-yellow-600">
-                            <i class="fas fa-calendar-alt fa-2x mb-2"></i>
-                            <p>Selecciona una fecha de colecta programada</p>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
 
             // ========== PREFERENCIA: Usar RPC de PostgreSQL ==========
             // Los cálculos se hacen en la base de datos (más eficiente)
@@ -709,9 +725,12 @@ export const moduloCalculadora = {
 
     // ============================================
     // SINCRONIZAR: Traer datos desde API de ML
+    // @param silencioso: si es true, no muestra errores y continúa con datos existentes
     // ============================================
-    sincronizarDesdeML: async () => {
-        mostrarNotificacion('Sincronizando con Mercado Libre...', 'info');
+    sincronizarDesdeML: async (silencioso = false) => {
+        if (!silencioso) {
+            mostrarNotificacion('Sincronizando con Mercado Libre...', 'info');
+        }
 
         try {
             // Verificar si hay token de ML almacenado
@@ -722,8 +741,13 @@ export const moduloCalculadora = {
                 .single();
 
             if (tokenError || !tokenData?.valor) {
-                mostrarNotificacion('No hay sesión de ML activa. Ve a Configuración para conectar.', 'warning');
-                return false;
+                if (!silencioso) {
+                    mostrarNotificacion('No hay sesión de ML activa. Ve a Configuración para conectar.', 'warning');
+                } else {
+                    console.log('Sin sesión ML activa, usando datos existentes en Supabase');
+                }
+                // Continúa con datos existentes - no es un error bloqueante
+                return { success: true, source: 'cache' };
             }
 
             // Llamar Edge Function de Supabase para sincronizar
@@ -734,24 +758,28 @@ export const moduloCalculadora = {
             if (error) {
                 // Si no hay Edge Function, usar datos de Supabase existentes
                 console.warn('Edge Function no disponible:', error);
-                mostrarNotificacion('Usando datos de la última migración. Actualiza desde Migración.', 'info');
-
-                // Recalcular con datos existentes
-                await moduloCalculadora.calcular();
-                return true;
+                if (!silencioso) {
+                    mostrarNotificacion('Usando datos de la última migración.', 'info');
+                }
+                return { success: true, source: 'cache' };
             }
 
             if (data?.success) {
-                mostrarNotificacion(`Sincronizado: ${data.updated || 0} productos actualizados`, 'success');
-                await moduloCalculadora.calcular();
-                return true;
+                const updated = data.updated || 0;
+                if (!silencioso && updated > 0) {
+                    mostrarNotificacion(`Sincronizado: ${updated} productos actualizados`, 'success');
+                }
+                return { success: true, source: 'api', updated };
             }
 
-            return false;
+            return { success: true, source: 'cache' };
         } catch (error) {
             console.error('Error sincronizando:', error);
-            mostrarNotificacion('Error de sincronización. Verifica la conexión.', 'error');
-            return false;
+            if (!silencioso) {
+                mostrarNotificacion('Error de sincronización. Usando datos existentes.', 'warning');
+            }
+            // Aún así retorna success para que el cálculo continúe
+            return { success: true, source: 'cache' };
         }
     }
 };
