@@ -670,11 +670,11 @@ export const moduloEnviosCreados = {
                     fontSize: 9
                 },
                 columnStyles: {
-                    0: { cellWidth: 8, halign: 'center' },
-                    1: { cellWidth: 38 },
-                    2: { cellWidth: 28, fontSize: 8 },
-                    3: { cellWidth: 100 },
-                    4: { cellWidth: 14, halign: 'center', fontStyle: 'bold' }
+                    0: { cellWidth: 12, halign: 'center' },
+                    1: { cellWidth: 36 },
+                    2: { cellWidth: 24, fontSize: 8 },
+                    3: { cellWidth: 104 },
+                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }
                 },
                 styles: {
                     fontSize: 9,
