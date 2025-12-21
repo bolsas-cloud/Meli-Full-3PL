@@ -529,17 +529,26 @@ export const moduloDashboard = {
             return;
         }
 
-        tbody.innerHTML = topProductos.map((p, idx) => `
+        tbody.innerHTML = topProductos.map((p, idx) => {
+            // Mostrar SKU si existe, sino mostrar ID de item abreviado
+            let skuDisplay = p.sku;
+            if (!skuDisplay || skuDisplay === 'N/A') {
+                // Mostrar ultimos 8 caracteres del id_item si no hay SKU
+                skuDisplay = p.id_item ? `...${p.id_item.slice(-8)}` : '-';
+            }
+
+            return `
             <tr class="hover:bg-gray-50 transition-colors">
-                <td class="px-4 py-3 font-bold text-gray-400">${idx + 1}</td>
-                <td class="px-4 py-3 font-mono text-xs text-gray-600">${p.sku || 'N/A'}</td>
+                <td class="px-4 py-3 font-bold text-gray-400 w-12">${idx + 1}</td>
+                <td class="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">${skuDisplay}</td>
                 <td class="px-4 py-3">
-                    <div class="max-w-xs truncate" title="${p.titulo || ''}">${p.titulo || '-'}</div>
+                    <div class="truncate" style="max-width: 500px;" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                 </td>
-                <td class="px-4 py-3 text-right font-medium">${formatearNumero(p.cantidad_vendida || 0)}</td>
-                <td class="px-4 py-3 text-right font-medium text-green-600">${formatearMoneda(p.total_vendido || 0)}</td>
+                <td class="px-4 py-3 text-right font-medium whitespace-nowrap">${formatearNumero(p.cantidad_vendida || 0)}</td>
+                <td class="px-4 py-3 text-right font-medium text-green-600 whitespace-nowrap">${formatearMoneda(p.total_vendido || 0)}</td>
             </tr>
-        `).join('');
+        `;
+        }).join('');
     },
 
     // ============================================
