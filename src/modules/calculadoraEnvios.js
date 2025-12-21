@@ -71,29 +71,29 @@ export const moduloCalculadora = {
                         </div>
                     </div>
 
-                    <div class="mt-4 pt-4 border-t border-gray-200">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-calendar-alt text-brand mr-1"></i>
-                            Fecha de Colecta Programada
-                            <i class="fas fa-info-circle text-gray-400 ml-1" title="Fecha en que ML recolectará el envío. El cálculo considera el stock que se venderá hasta esa fecha."></i>
-                        </label>
-                        <input type="date" id="param-fecha-colecta"
-                               class="w-full md:w-64 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
-                    </div>
+                    <div class="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-end gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-calendar-alt text-brand mr-1"></i>
+                                Fecha de Colecta Programada
+                                <i class="fas fa-info-circle text-gray-400 ml-1" title="Fecha en que ML recolectará el envío. El cálculo considera el stock que se venderá hasta esa fecha."></i>
+                            </label>
+                            <input type="date" id="param-fecha-colecta"
+                                   class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                        </div>
 
-                    <div class="mt-4 flex gap-3">
                         <button onclick="moduloCalculadora.calcular()"
-                                class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2">
+                                class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2 h-[42px]">
                             <i class="fas fa-calculator"></i>
                             Calcular Sugerencias
                         </button>
                         <button onclick="moduloCalculadora.sincronizarDesdeML()"
-                                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 h-[42px]">
                             <i class="fas fa-sync-alt"></i>
                             Sincronizar ML
                         </button>
                         <button onclick="moduloCalculadora.guardarConfig()"
-                                class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors">
+                                class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center gap-2 h-[42px]">
                             <i class="fas fa-save"></i>
                             Guardar Config
                         </button>
