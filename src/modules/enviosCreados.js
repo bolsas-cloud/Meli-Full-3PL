@@ -595,7 +595,7 @@ export const moduloEnviosCreados = {
     // ============================================
     // GENERAR PDF: Crear PDF del envío para imprimir
     // ============================================
-    generarPDF: (idEnvio) => {
+    generarPDF: async (idEnvio) => {
         const envio = enviosCache.find(e => e.id_envio === idEnvio);
         if (!envio) {
             mostrarNotificacion('Envío no encontrado', 'error');
@@ -603,6 +603,21 @@ export const moduloEnviosCreados = {
         }
 
         try {
+            // Obtener inventory_id de cada producto desde publicaciones_meli
+            const skus = envio.productos.map(p => p.sku).filter(Boolean);
+            let inventoryMap = {};
+
+            if (skus.length > 0) {
+                const { data: pubs } = await supabase
+                    .from('publicaciones_meli')
+                    .select('sku, id_inventario')
+                    .in('sku', skus);
+
+                if (pubs) {
+                    pubs.forEach(p => inventoryMap[p.sku] = p.id_inventario);
+                }
+            }
+
             // Usar jsPDF (ya incluido en index.html)
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
@@ -618,50 +633,54 @@ export const moduloEnviosCreados = {
             // Info del envío
             doc.setFontSize(12);
             doc.setTextColor(0, 0, 0);
-            doc.text(`ID: ${envio.id_envio}`, 20, 35);
-            doc.text(`Estado: ${envio.estado}`, 120, 35);
+            doc.text(`ID: ${envio.id_envio}`, 14, 35);
+            doc.text(`Estado: ${envio.estado}`, 130, 35);
 
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
-            doc.text(`Fecha Creación: ${fechaCreacion.toLocaleDateString('es-AR')}`, 20, 45);
-            doc.text(`Fecha Colecta: ${fechaColecta ? fechaColecta.toLocaleDateString('es-AR') : '-'}`, 120, 45);
+            doc.text(`Fecha Creación: ${fechaCreacion.toLocaleDateString('es-AR')}`, 14, 45);
+            doc.text(`Fecha Colecta: ${fechaColecta ? fechaColecta.toLocaleDateString('es-AR') : '-'}`, 130, 45);
 
             if (envio.id_envio_ml) {
-                doc.text(`ID ML: ${envio.id_envio_ml}`, 20, 52);
+                doc.text(`ID ML: ${envio.id_envio_ml}`, 14, 52);
             }
 
             // Línea separadora
             doc.setDrawColor(200, 200, 200);
-            doc.line(20, 58, 190, 58);
+            doc.line(14, 58, 196, 58);
 
-            // Tabla de productos usando autoTable
+            // Tabla de productos usando autoTable con inventory_id
             const productosData = envio.productos.map((p, idx) => [
                 idx + 1,
                 p.sku || '-',
-                (p.titulo || '-').substring(0, 40),
+                inventoryMap[p.sku] || '-',
+                (p.titulo || '-').substring(0, 50),
                 p.cantidad_enviada || 0
             ]);
 
             doc.autoTable({
                 startY: 65,
-                head: [['#', 'SKU', 'Producto', 'Cantidad']],
+                head: [['#', 'SKU', 'Inventory ID', 'Producto', 'Cant.']],
                 body: productosData,
                 theme: 'striped',
                 headStyles: {
                     fillColor: [78, 171, 135],
                     textColor: 255,
-                    fontStyle: 'bold'
+                    fontStyle: 'bold',
+                    fontSize: 9
                 },
                 columnStyles: {
-                    0: { cellWidth: 10, halign: 'center' },
-                    1: { cellWidth: 35 },
-                    2: { cellWidth: 100 },
-                    3: { cellWidth: 25, halign: 'center', fontStyle: 'bold' }
+                    0: { cellWidth: 8, halign: 'center' },
+                    1: { cellWidth: 38 },
+                    2: { cellWidth: 28, fontSize: 8 },
+                    3: { cellWidth: 100 },
+                    4: { cellWidth: 14, halign: 'center', fontStyle: 'bold' }
                 },
                 styles: {
                     fontSize: 9,
-                    cellPadding: 3
-                }
+                    cellPadding: 2.5
+                },
+                margin: { left: 14, right: 14 }
             });
 
             // Totales
@@ -670,14 +689,14 @@ export const moduloEnviosCreados = {
 
             doc.setFontSize(12);
             doc.setTextColor(0, 0, 0);
-            doc.text(`Total SKUs: ${envio.productos.length}`, 20, finalY);
-            doc.text(`Total Bultos: ${totalBultos}`, 120, finalY);
+            doc.text(`Total SKUs: ${envio.productos.length}`, 14, finalY);
+            doc.text(`Total Bultos: ${totalBultos}`, 130, finalY);
 
             // Notas si existen
             if (envio.notas) {
                 doc.setFontSize(9);
                 doc.setTextColor(100, 100, 100);
-                doc.text(`Notas: ${envio.notas}`, 20, finalY + 10);
+                doc.text(`Notas: ${envio.notas}`, 14, finalY + 10);
             }
 
             // Footer
@@ -790,14 +809,14 @@ export const moduloEnviosCreados = {
 
                 <!-- Tabla de productos -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <table class="w-full">
+                    <table class="w-full table-fixed">
                         <thead class="bg-gray-50 border-b border-gray-200">
                             <tr>
-                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU / Título</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Inventory ID</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">A Enviar</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Escaneados</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-auto">SKU / Título</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-28">Inventory ID</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20">A Enviar</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Escaneados</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Estado</th>
                             </tr>
                         </thead>
                         <tbody id="tabla-preparacion">
@@ -848,12 +867,12 @@ export const moduloEnviosCreados = {
                     onclick="moduloEnviosCreados.seleccionarProducto(${idx})">
                     <td class="px-4 py-3">
                         <div class="font-medium text-gray-800">${p.sku || '-'}</div>
-                        <div class="text-xs text-gray-500 truncate max-w-xs">${p.titulo || '-'}</div>
+                        <div class="text-xs text-gray-500 truncate" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
-                    <td class="px-4 py-3 text-center text-sm font-mono text-gray-600">${p.inventory_id || '-'}</td>
-                    <td class="px-4 py-3 text-center font-bold text-gray-800">${requeridos}</td>
-                    <td class="px-4 py-3 text-center font-bold text-lg ${escaneados >= requeridos ? 'text-green-600' : 'text-gray-800'}">${escaneados}</td>
-                    <td class="px-4 py-3 text-center">
+                    <td class="px-4 py-3 text-center text-sm font-mono text-gray-600 w-28">${p.inventory_id || '-'}</td>
+                    <td class="px-4 py-3 text-center font-bold text-gray-800 w-20">${requeridos}</td>
+                    <td class="px-4 py-3 text-center font-bold text-lg w-24 ${escaneados >= requeridos ? 'text-green-600' : 'text-gray-800'}">${escaneados}</td>
+                    <td class="px-4 py-3 text-center w-24">
                         <span class="px-2 py-1 rounded-full text-xs font-bold ${estadoClase}">${estadoTexto}</span>
                     </td>
                 </tr>
