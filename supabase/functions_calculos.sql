@@ -7,6 +7,13 @@
 -- 1. CALCULAR SUGERENCIAS DE ENVÍO
 -- Fórmula basada en fecha de colecta (igual que GAS)
 -- ============================================
+-- ============================================
+-- IMPORTANTE: Ejecutar DESPUÉS de las migraciones:
+-- 1. fix_primary_key.sql
+-- 2. migration_ordenes_composite_key.sql
+-- 3. migration_add_sync_columns.sql
+-- ============================================
+
 CREATE OR REPLACE FUNCTION calcular_sugerencias_envio(
     p_fecha_colecta DATE,
     p_tiempo_transito INTEGER DEFAULT 3,
