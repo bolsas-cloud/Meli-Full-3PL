@@ -15,6 +15,11 @@ function onOpen() {
     .addItem('📦 Exportar Órdenes', 'exportarOrdenes')
     .addItem('⚙️ Exportar Config Logística', 'exportarConfigLogistica')
     .addItem('🚚 Exportar Registro Envíos Full', 'exportarEnviosFull')
+    .addItem('📋 Exportar Detalle Envíos Full', 'exportarDetalleEnviosFull')
+    .addItem('📊 Exportar Costos Publicidad', 'exportarCostosPublicidad')
+    .addItem('📦 Exportar Preparación En Curso', 'exportarPreparacionEnCurso')
+    .addItem('💰 Exportar Historial Precios', 'exportarHistorialPrecios')
+    .addItem('📈 Exportar Sugerencias Envío', 'exportarSugerenciasEnvio')
     .addSeparator()
     .addItem('📁 Exportar TODO a carpeta', 'exportarTodo')
     .addToUi();
@@ -125,6 +130,52 @@ function normalizarNumero(valor, decimales = 2) {
 function normalizarEntero(valor) {
   const num = normalizarNumero(valor, 0);
   return num !== null ? Math.round(num) : null;
+}
+
+/**
+ * Normaliza una fecha solo (YYYY-MM-DD, sin hora)
+ * Para tablas como costos_publicidad donde la clave es DATE
+ */
+function normalizarFechaSolo(valor) {
+  if (!valor || valor === '' || valor === '(vacío)') return null;
+
+  try {
+    let fecha;
+
+    if (valor instanceof Date) {
+      fecha = valor;
+    } else if (typeof valor === 'string') {
+      // Intentar parsear formato YYYY-MM-DD directamente
+      if (/^\d{4}-\d{2}-\d{2}/.test(valor)) {
+        return valor.substring(0, 10); // Ya está en formato correcto
+      }
+      // Formato DD/MM/YYYY
+      if (valor.includes('/')) {
+        const partes = valor.split(/[\s\/]/);
+        if (partes.length >= 3) {
+          const dia = parseInt(partes[0]).toString().padStart(2, '0');
+          const mes = parseInt(partes[1]).toString().padStart(2, '0');
+          const anio = partes[2];
+          return `${anio}-${mes}-${dia}`;
+        }
+      }
+      fecha = new Date(valor);
+    } else {
+      return null;
+    }
+
+    if (isNaN(fecha.getTime())) return null;
+
+    // Formato YYYY-MM-DD
+    const anio = fecha.getFullYear();
+    const mes = (fecha.getMonth() + 1).toString().padStart(2, '0');
+    const dia = fecha.getDate().toString().padStart(2, '0');
+    return `${anio}-${mes}-${dia}`;
+
+  } catch (e) {
+    Logger.log('Error parseando fecha solo: ' + valor + ' - ' + e.message);
+    return null;
+  }
 }
 
 /**
@@ -346,6 +397,191 @@ function exportarEnviosFull() {
 }
 
 /**
+ * Exporta el detalle de envíos a Full (productos por envío)
+ */
+function exportarDetalleEnviosFull() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Detalle_Envios_Full');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('No se encontró la hoja "Detalle_Envios_Full"');
+    return;
+  }
+
+  ss.toast('Procesando detalle de envíos...', 'Exportando', -1);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const mapeo = {
+    'ID_Envio': { nombre: 'id_envio', tipo: 'texto' },
+    'SKU': { nombre: 'sku', tipo: 'texto' },
+    'Cantidad_Enviada': { nombre: 'cantidad_enviada', tipo: 'entero' }
+  };
+
+  // Clave compuesta: id_envio + sku
+  const resultado = procesarYExportarConDedup(data, headers, mapeo, 'detalle_envios_full', ['id_envio', 'sku']);
+
+  ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
+  SpreadsheetApp.getUi().alert(
+    '✅ Exportación completada\n\n' +
+    `Archivo: ${resultado.archivo}\n` +
+    `Filas procesadas: ${resultado.filas}\n` +
+    `Duplicados eliminados: ${resultado.duplicados}\n\n` +
+    'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
+  );
+}
+
+/**
+ * Exporta los costos de publicidad diarios (para Dashboard)
+ */
+function exportarCostosPublicidad() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Meli_Costos_Publicidad');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('No se encontró la hoja "Meli_Costos_Publicidad"');
+    return;
+  }
+
+  ss.toast('Procesando costos de publicidad...', 'Exportando', -1);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const mapeo = {
+    'Fecha': { nombre: 'fecha', tipo: 'fechaSolo' },  // Solo fecha, sin hora
+    'Costo_Diario': { nombre: 'costo_diario', tipo: 'numero' }
+  };
+
+  const resultado = procesarYExportar(data, headers, mapeo, 'costos_publicidad', 'fecha');
+
+  ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
+  SpreadsheetApp.getUi().alert(
+    '✅ Exportación completada\n\n' +
+    `Archivo: ${resultado.archivo}\n` +
+    `Filas procesadas: ${resultado.filas}\n\n` +
+    'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
+  );
+}
+
+/**
+ * Exporta la preparación en curso (escaneo de productos)
+ */
+function exportarPreparacionEnCurso() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Preparacion_En_Curso');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('No se encontró la hoja "Preparacion_En_Curso"');
+    return;
+  }
+
+  ss.toast('Procesando preparación en curso...', 'Exportando', -1);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const mapeo = {
+    'ID_Envio': { nombre: 'id_envio', tipo: 'texto' },
+    'SKU': { nombre: 'sku', tipo: 'texto' },
+    'Inventory_ID': { nombre: 'inventory_id', tipo: 'texto' },
+    'Titulo': { nombre: 'titulo', tipo: 'texto' },
+    'Cantidad_Requerida': { nombre: 'cantidad_requerida', tipo: 'entero' },
+    'Cantidad_Escaneada': { nombre: 'cantidad_escaneada', tipo: 'entero' }
+  };
+
+  // Clave compuesta: id_envio + sku
+  const resultado = procesarYExportarConDedup(data, headers, mapeo, 'preparacion_en_curso', ['id_envio', 'sku']);
+
+  ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
+  SpreadsheetApp.getUi().alert(
+    '✅ Exportación completada\n\n' +
+    `Archivo: ${resultado.archivo}\n` +
+    `Filas procesadas: ${resultado.filas}\n` +
+    `Duplicados eliminados: ${resultado.duplicados}\n\n` +
+    'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
+  );
+}
+
+/**
+ * Exporta el historial de cambios de precios
+ */
+function exportarHistorialPrecios() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Historial_Cambio_Precios');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('No se encontró la hoja "Historial_Cambio_Precios"');
+    return;
+  }
+
+  ss.toast('Procesando historial de precios...', 'Exportando', -1);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const mapeo = {
+    'Fecha_Cambio': { nombre: 'fecha_cambio', tipo: 'fecha' },
+    'ItemID': { nombre: 'item_id', tipo: 'texto' },
+    'SKU': { nombre: 'sku', tipo: 'texto' },
+    'Precio_Anterior': { nombre: 'precio_anterior', tipo: 'numero' },
+    'Precio_Nuevo': { nombre: 'precio_nuevo', tipo: 'numero' }
+  };
+
+  // Sin clave primaria específica (usa ID auto-incremental en Supabase)
+  const resultado = procesarYExportarSinClave(data, headers, mapeo, 'historial_cambio_precios');
+
+  ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
+  SpreadsheetApp.getUi().alert(
+    '✅ Exportación completada\n\n' +
+    `Archivo: ${resultado.archivo}\n` +
+    `Filas procesadas: ${resultado.filas}\n\n` +
+    'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
+  );
+}
+
+/**
+ * Exporta las sugerencias de envío calculadas
+ */
+function exportarSugerenciasEnvio() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Sugerencias_Envio_Full');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('No se encontró la hoja "Sugerencias_Envio_Full"');
+    return;
+  }
+
+  ss.toast('Procesando sugerencias de envío...', 'Exportando', -1);
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const mapeo = {
+    'SKU': { nombre: 'sku', tipo: 'texto' },
+    'Título': { nombre: 'titulo', tipo: 'texto' },
+    'Ventas/Día (V)': { nombre: 'ventas_dia', tipo: 'numero' },
+    'Stock Actual Full (Sml)': { nombre: 'stock_actual_full', tipo: 'entero' },
+    'Stock en Tránsito': { nombre: 'stock_en_transito', tipo: 'entero' },
+    'Stock de Seguridad (Ss)': { nombre: 'stock_seguridad', tipo: 'entero' },
+    'Días de Cobertura Actual': { nombre: 'dias_cobertura', tipo: 'numero' },
+    'Cantidad a Enviar': { nombre: 'cantidad_a_enviar', tipo: 'entero' },
+    'Nivel de Riesgo': { nombre: 'nivel_riesgo', tipo: 'texto' }
+  };
+
+  const resultado = procesarYExportar(data, headers, mapeo, 'sugerencias_envio_full', 'sku');
+
+  ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
+  SpreadsheetApp.getUi().alert(
+    '✅ Exportación completada\n\n' +
+    `Archivo: ${resultado.archivo}\n` +
+    `Filas procesadas: ${resultado.filas}\n\n` +
+    'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
+  );
+}
+
+/**
  * Exporta todas las hojas a la vez
  */
 function exportarTodo() {
@@ -358,31 +594,38 @@ function exportarTodo() {
 
   if (respuesta !== ui.Button.YES) return;
 
-  try {
-    exportarPublicaciones();
-  } catch (e) {
-    Logger.log('Error exportando publicaciones: ' + e.message);
-  }
+  const exportaciones = [
+    { nombre: 'Publicaciones', fn: exportarPublicaciones },
+    { nombre: 'Órdenes', fn: exportarOrdenes },
+    { nombre: 'Config Logística', fn: exportarConfigLogistica },
+    { nombre: 'Registro Envíos Full', fn: exportarEnviosFull },
+    { nombre: 'Detalle Envíos Full', fn: exportarDetalleEnviosFull },
+    { nombre: 'Costos Publicidad', fn: exportarCostosPublicidad },
+    { nombre: 'Preparación En Curso', fn: exportarPreparacionEnCurso },
+    { nombre: 'Historial Precios', fn: exportarHistorialPrecios },
+    { nombre: 'Sugerencias Envío', fn: exportarSugerenciasEnvio }
+  ];
 
-  try {
-    exportarOrdenes();
-  } catch (e) {
-    Logger.log('Error exportando órdenes: ' + e.message);
-  }
+  let exitosos = 0;
+  let errores = [];
 
-  try {
-    exportarConfigLogistica();
-  } catch (e) {
-    Logger.log('Error exportando config: ' + e.message);
-  }
+  exportaciones.forEach(exp => {
+    try {
+      exp.fn();
+      exitosos++;
+    } catch (e) {
+      Logger.log(`Error exportando ${exp.nombre}: ${e.message}`);
+      errores.push(exp.nombre);
+    }
+  });
 
-  try {
-    exportarEnviosFull();
-  } catch (e) {
-    Logger.log('Error exportando envíos: ' + e.message);
+  let mensaje = `✅ Exportación completa\n\nExitosos: ${exitosos}/${exportaciones.length}`;
+  if (errores.length > 0) {
+    mensaje += `\n\n⚠️ Con errores: ${errores.join(', ')}`;
   }
+  mensaje += '\n\nRevisa la carpeta "Exportaciones_Supabase" en tu Google Drive.';
 
-  ui.alert('✅ Exportación completa\n\nRevisa la carpeta "Exportaciones_Supabase" en tu Google Drive.');
+  ui.alert(mensaje);
 }
 
 // ============================================================================
@@ -427,6 +670,9 @@ function procesarYExportar(data, headers, mapeo, nombreTabla, clavePrimaria) {
       switch (config.tipo) {
         case 'fecha':
           valorNormalizado = normalizarFecha(valorOriginal);
+          break;
+        case 'fechaSolo':
+          valorNormalizado = normalizarFechaSolo(valorOriginal);
           break;
         case 'numero':
           valorNormalizado = normalizarNumero(valorOriginal);
@@ -517,6 +763,9 @@ function procesarYExportarConDedup(data, headers, mapeo, nombreTabla, clavesComp
         case 'fecha':
           valorNormalizado = normalizarFecha(valorOriginal);
           break;
+        case 'fechaSolo':
+          valorNormalizado = normalizarFechaSolo(valorOriginal);
+          break;
         case 'numero':
           valorNormalizado = normalizarNumero(valorOriginal);
           break;
@@ -568,6 +817,93 @@ function procesarYExportarConDedup(data, headers, mapeo, nombreTabla, clavesComp
     filas: filasCSV.length,
     omitidas: omitidas,
     duplicados: duplicados,
+    url: archivo.getUrl()
+  };
+}
+
+/**
+ * Procesa los datos sin requerir clave primaria (para tablas con ID auto-incremental)
+ * Útil para historial_cambio_precios donde el ID es SERIAL en Supabase
+ */
+function procesarYExportarSinClave(data, headers, mapeo, nombreTabla) {
+  // Encontrar índices de columnas
+  const indices = {};
+  Object.keys(mapeo).forEach(headerOriginal => {
+    const idx = headers.indexOf(headerOriginal);
+    if (idx >= 0) {
+      indices[headerOriginal] = idx;
+    }
+  });
+
+  // Generar headers del CSV (columnas de Supabase)
+  const headersCSV = Object.keys(mapeo)
+    .filter(h => indices[h] !== undefined)
+    .map(h => mapeo[h].nombre);
+
+  // Procesar filas
+  const filasCSV = [];
+  let omitidas = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const fila = data[i];
+    const registro = {};
+    let tieneAlgunDato = false;
+
+    Object.keys(mapeo).forEach(headerOriginal => {
+      const idx = indices[headerOriginal];
+      if (idx === undefined) return;
+
+      const config = mapeo[headerOriginal];
+      const valorOriginal = fila[idx];
+      let valorNormalizado;
+
+      switch (config.tipo) {
+        case 'fecha':
+          valorNormalizado = normalizarFecha(valorOriginal);
+          break;
+        case 'fechaSolo':
+          valorNormalizado = normalizarFechaSolo(valorOriginal);
+          break;
+        case 'numero':
+          valorNormalizado = normalizarNumero(valorOriginal);
+          break;
+        case 'entero':
+          valorNormalizado = normalizarEntero(valorOriginal);
+          break;
+        case 'booleano':
+          valorNormalizado = normalizarBooleano(valorOriginal);
+          break;
+        default:
+          valorNormalizado = normalizarTexto(valorOriginal);
+      }
+
+      registro[config.nombre] = valorNormalizado;
+
+      if (valorNormalizado !== null && valorNormalizado !== '') {
+        tieneAlgunDato = true;
+      }
+    });
+
+    // Incluir filas que tengan al menos algún dato
+    if (tieneAlgunDato) {
+      const filaCSV = headersCSV.map(h => escaparCSV(registro[h]));
+      filasCSV.push(filaCSV.join(','));
+    } else {
+      omitidas++;
+    }
+  }
+
+  // Crear contenido CSV
+  const contenidoCSV = headersCSV.join(',') + '\n' + filasCSV.join('\n');
+
+  // Guardar archivo
+  const nombreArchivo = `${nombreTabla}_${Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyyMMdd_HHmmss')}.csv`;
+  const archivo = guardarCSV(nombreArchivo, contenidoCSV);
+
+  return {
+    archivo: nombreArchivo,
+    filas: filasCSV.length,
+    omitidas: omitidas,
     url: archivo.getUrl()
   };
 }
