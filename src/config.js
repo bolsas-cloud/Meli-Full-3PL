@@ -10,7 +10,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 export const MELI_CONFIG = {
     APP_ID: '4370336012652573',
     CLIENT_SECRET: 'LXRXjcqrcWxDemTEv7Iq8GVIMBOsUZzB',
-    REDIRECT_URI: 'https://meli-full-3pl.vercel.app/callback.html',
+    REDIRECT_URI: 'https://meli-full-3-pl.vercel.app/callback.html',
     AUTH_URL: 'https://auth.mercadolibre.com.ar/authorization',
     TOKEN_URL: 'https://api.mercadolibre.com/oauth/token',
     API_BASE: 'https://api.mercadolibre.com'
