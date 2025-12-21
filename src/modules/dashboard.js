@@ -81,10 +81,19 @@ export const moduloDashboard = {
 
                     <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center text-xs text-gray-500">
                         <span id="info-periodo">Mostrando: ${formatearFecha(filtros.desde)} - ${formatearFecha(filtros.hasta)}</span>
-                        <span id="info-actualizacion">
-                            <i class="fas fa-clock mr-1"></i>
-                            Cargando...
-                        </span>
+                        <div class="flex items-center gap-3">
+                            <span id="info-actualizacion">
+                                <i class="fas fa-clock mr-1"></i>
+                                Cargando...
+                            </span>
+                            <button onclick="moduloDashboard.sincronizarDatos()"
+                                    id="btn-sync"
+                                    class="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                                    title="Sincronizar ordenes y stock desde Mercado Libre">
+                                <i class="fas fa-sync-alt" id="sync-icon"></i>
+                                <span>Sincronizar ML</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -655,6 +664,65 @@ export const moduloDashboard = {
         // Recargar datos
         mostrarNotificacion('Cargando datos...', 'info');
         await moduloDashboard.cargarDatos();
+    },
+
+    // ============================================
+    // SINCRONIZAR DATOS: Llama a Edge Function
+    // ============================================
+    sincronizarDatos: async () => {
+        const btn = document.getElementById('btn-sync');
+        const icon = document.getElementById('sync-icon');
+
+        if (!btn || btn.disabled) return;
+
+        try {
+            // Deshabilitar boton y mostrar spinner
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            icon.classList.add('fa-spin');
+
+            mostrarNotificacion('Sincronizando con Mercado Libre...', 'info');
+
+            // Llamar a la Edge Function
+            const { data, error } = await supabase.functions.invoke('sync-meli', {
+                body: { action: 'sync-all' }
+            });
+
+            if (error) throw error;
+
+            // Mostrar resultado
+            const ordenes = data?.orders?.nuevas || 0;
+            const inventario = data?.inventory?.updated || 0;
+
+            mostrarNotificacion(
+                `Sincronizacion completada: ${ordenes} ordenes nuevas, ${inventario} items actualizados`,
+                'success'
+            );
+
+            // Recargar datos del dashboard
+            await moduloDashboard.cargarDatos();
+
+        } catch (error) {
+            console.error('Error sincronizando:', error);
+
+            // Manejar errores especificos
+            if (error.message?.includes('token') || error.message?.includes('401')) {
+                mostrarNotificacion('Token de ML expirado. Reconecta desde Configuracion.', 'error');
+            } else if (error.message?.includes('Edge Function')) {
+                mostrarNotificacion('La Edge Function no esta desplegada. Ejecuta: npx supabase functions deploy sync-meli', 'warning');
+            } else {
+                mostrarNotificacion(`Error: ${error.message || 'No se pudo sincronizar'}`, 'error');
+            }
+        } finally {
+            // Restaurar boton
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+            if (icon) {
+                icon.classList.remove('fa-spin');
+            }
+        }
     }
 };
 
