@@ -106,7 +106,7 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // CARGAR: Obtener envíos desde Supabase
+    // CARGAR: Obtener envíos desde Supabase (OPTIMIZADO)
     // ============================================
     cargarEnvios: async () => {
         const listaDiv = document.getElementById('lista-envios');
@@ -118,48 +118,55 @@ export const moduloEnviosCreados = {
         `;
 
         try {
-            // Obtener envíos
-            const { data: envios, error } = await supabase
-                .from('registro_envios_full')
-                .select('*')
-                .order('fecha_creacion', { ascending: false });
-
-            if (error) throw error;
-
-            // Obtener detalles de cada envío
-            for (const envio of envios) {
-                const { data: detalles, error: errorDet } = await supabase
+            // Consultas en paralelo (3 queries en lugar de N+1)
+            const [enviosRes, detallesRes] = await Promise.all([
+                supabase
+                    .from('registro_envios_full')
+                    .select('*')
+                    .order('fecha_creacion', { ascending: false }),
+                supabase
                     .from('detalle_envios_full')
-                    .select('sku, id_publicacion, cantidad_enviada')
-                    .eq('id_envio', envio.id_envio);
+                    .select('id_envio, sku, id_publicacion, cantidad_enviada')
+            ]);
 
-                if (!errorDet) {
-                    envio.productos = detalles || [];
-                    envio.totalBultos = detalles.reduce((sum, d) => sum + (d.cantidad_enviada || 0), 0);
-                } else {
-                    envio.productos = [];
-                    envio.totalBultos = 0;
-                }
+            if (enviosRes.error) throw enviosRes.error;
 
-                // Obtener títulos de productos desde publicaciones
-                if (envio.productos.length > 0) {
-                    const skus = envio.productos.map(p => p.sku).filter(Boolean);
-                    if (skus.length > 0) {
-                        const { data: pubs } = await supabase
-                            .from('publicaciones_meli')
-                            .select('sku, titulo')
-                            .in('sku', skus);
+            const envios = enviosRes.data || [];
+            const todosDetalles = detallesRes.data || [];
 
-                        if (pubs) {
-                            const titulosMap = {};
-                            pubs.forEach(p => titulosMap[p.sku] = p.titulo);
-                            envio.productos.forEach(p => {
-                                p.titulo = titulosMap[p.sku] || p.sku;
-                            });
-                        }
-                    }
+            // Obtener todos los SKUs únicos para buscar títulos
+            const todosSkus = [...new Set(todosDetalles.map(d => d.sku).filter(Boolean))];
+
+            // Tercera consulta: títulos (solo si hay SKUs)
+            let titulosMap = {};
+            if (todosSkus.length > 0) {
+                const { data: pubs } = await supabase
+                    .from('publicaciones_meli')
+                    .select('sku, titulo')
+                    .in('sku', todosSkus);
+
+                if (pubs) {
+                    pubs.forEach(p => titulosMap[p.sku] = p.titulo);
                 }
             }
+
+            // Asociar detalles a cada envío en memoria
+            const detallesPorEnvio = {};
+            todosDetalles.forEach(det => {
+                if (!detallesPorEnvio[det.id_envio]) {
+                    detallesPorEnvio[det.id_envio] = [];
+                }
+                detallesPorEnvio[det.id_envio].push({
+                    ...det,
+                    titulo: titulosMap[det.sku] || det.sku
+                });
+            });
+
+            // Agregar productos y totales a cada envío
+            envios.forEach(envio => {
+                envio.productos = detallesPorEnvio[envio.id_envio] || [];
+                envio.totalBultos = envio.productos.reduce((sum, d) => sum + (d.cantidad_enviada || 0), 0);
+            });
 
             enviosCache = envios;
             moduloEnviosCreados.pintarEnvios(envios);
