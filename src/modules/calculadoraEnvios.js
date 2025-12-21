@@ -29,32 +29,32 @@ export const moduloCalculadora = {
                         Parámetros de Cálculo
                     </h3>
 
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
                                 Tiempo Tránsito (días)
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Días que tarda el envío en llegar a Full"></i>
                             </label>
                             <input type="number" id="param-transito" value="3" min="1" max="15"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
 
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
                                 Frecuencia Envío (días)
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Cada cuántos días envías a Full"></i>
                             </label>
                             <input type="number" id="param-frecuencia" value="7" min="1" max="30"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
 
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
                                 Nivel de Servicio
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Confiabilidad del stock de seguridad"></i>
                             </label>
                             <select id="param-servicio"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
                                 <option value="1.28">90% - Relajado</option>
                                 <option value="1.65" selected>95% - Estándar</option>
                                 <option value="2.33">99% - Conservador</option>
@@ -62,46 +62,43 @@ export const moduloCalculadora = {
                         </div>
 
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
                                 Incremento Evento (%)
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Incremento por evento especial próximo"></i>
                             </label>
                             <input type="number" id="param-evento" value="0" min="0" max="200"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
+                        </div>
+
+                        <div>
+                            <button onclick="moduloCalculadora.guardarConfig()"
+                                    class="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2 h-[38px]">
+                                <i class="fas fa-save"></i>
+                                Guardar
+                            </button>
                         </div>
                     </div>
 
                     <div class="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-end gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <label class="block text-xs font-medium text-gray-700 mb-1">
                                 <i class="fas fa-calendar-alt text-brand mr-1"></i>
-                                Fecha de Colecta Programada
-                                <i class="fas fa-info-circle text-gray-400 ml-1" title="Fecha en que ML recolectará el envío. El cálculo considera el stock que se venderá hasta esa fecha."></i>
+                                Fecha de Colecta
+                                <i class="fas fa-info-circle text-gray-400 ml-1" title="Fecha en que ML recolectará el envío"></i>
                             </label>
                             <input type="date" id="param-fecha-colecta"
-                                   class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                                   class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
 
                         <button onclick="moduloCalculadora.calcular()"
-                                class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2 h-[42px]">
+                                class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2 h-[38px]">
                             <i class="fas fa-calculator"></i>
                             Calcular Sugerencias
                         </button>
                         <button onclick="moduloCalculadora.sincronizarDesdeML()"
-                                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 h-[42px]">
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 h-[38px]">
                             <i class="fas fa-sync-alt"></i>
                             Sincronizar ML
-                        </button>
-                        <button onclick="moduloCalculadora.guardarConfig()"
-                                class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center gap-2 h-[42px]">
-                            <i class="fas fa-save"></i>
-                            Guardar Config
-                        </button>
-                        <button onclick="moduloCalculadora.diagnosticar()"
-                                class="bg-yellow-100 text-yellow-700 px-4 py-2 rounded-lg font-medium hover:bg-yellow-200 transition-colors flex items-center gap-2 h-[42px]"
-                                title="Verificar estado de los datos">
-                            <i class="fas fa-stethoscope"></i>
-                            Diagnóstico
                         </button>
                     </div>
                 </div>

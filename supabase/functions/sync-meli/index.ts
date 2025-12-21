@@ -131,6 +131,7 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
   let updated = 0
   let offset = 0
   const limit = 50
+  const BATCH_SIZE = 20  // ML multiget soporta hasta 20 items por llamada
 
   try {
     // Obtener todos los items con fulfillment
@@ -147,115 +148,127 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
       if (itemIds.length === 0) break
 
-      // Obtener detalles de cada item
-      for (const itemId of itemIds) {
+      // ============================================
+      // BATCH REQUESTS: Obtener items en grupos de 20
+      // Usa multiget: /items?ids=ID1,ID2,...
+      // ============================================
+      for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+        const batchIds = itemIds.slice(i, i + BATCH_SIZE)
+
         try {
-          // Obtener datos del item
-          const itemResponse = await fetch(
-            `${ML_API_BASE}/items/${itemId}`,
+          // Multiget: obtener múltiples items en una sola llamada
+          const batchResponse = await fetch(
+            `${ML_API_BASE}/items?ids=${batchIds.join(',')}`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
           )
 
-          if (!itemResponse.ok) continue
+          if (!batchResponse.ok) continue
 
-          const item = await itemResponse.json()
+          const batchResults = await batchResponse.json()
 
-          // Buscar SKU en múltiples lugares (igual que GAS)
-          let skuFromApi = null
+          // Procesar cada item del batch
+          for (const itemResult of batchResults) {
+            if (itemResult.code !== 200 || !itemResult.body) continue
 
-          // Prioridad 1: seller_custom_field a nivel item
-          if (item.seller_custom_field) {
-            skuFromApi = item.seller_custom_field
-          }
+            const item = itemResult.body
 
-          // Prioridad 2: SELLER_SKU en atributos principales
-          if (!skuFromApi && item.attributes && Array.isArray(item.attributes)) {
-            const skuAttr = item.attributes.find((attr: any) => attr.id === "SELLER_SKU")
-            if (skuAttr && skuAttr.value_name) {
-              skuFromApi = skuAttr.value_name
+            // Buscar SKU en múltiples lugares (igual que GAS)
+            let skuFromApi = null
+
+            // Prioridad 1: seller_custom_field a nivel item
+            if (item.seller_custom_field) {
+              skuFromApi = item.seller_custom_field
             }
-          }
 
-          // Prioridad 3: SKU en variaciones
-          if (!skuFromApi && item.variations && Array.isArray(item.variations) && item.variations.length > 0) {
-            for (const variation of item.variations) {
-              if (variation.seller_custom_field) {
-                skuFromApi = variation.seller_custom_field
-                break
+            // Prioridad 2: SELLER_SKU en atributos principales
+            if (!skuFromApi && item.attributes && Array.isArray(item.attributes)) {
+              const skuAttr = item.attributes.find((attr: any) => attr.id === "SELLER_SKU")
+              if (skuAttr && skuAttr.value_name) {
+                skuFromApi = skuAttr.value_name
               }
-              if (variation.attributes && Array.isArray(variation.attributes)) {
-                const skuAttrVar = variation.attributes.find((attr: any) => attr.id === "SELLER_SKU")
-                if (skuAttrVar && skuAttrVar.value_name) {
-                  skuFromApi = skuAttrVar.value_name
+            }
+
+            // Prioridad 3: SKU en variaciones
+            if (!skuFromApi && item.variations && Array.isArray(item.variations) && item.variations.length > 0) {
+              for (const variation of item.variations) {
+                if (variation.seller_custom_field) {
+                  skuFromApi = variation.seller_custom_field
                   break
                 }
-              }
-            }
-          }
-
-          // Obtener stock de Full
-          // Método 1: Usar available_quantity del item directamente (como GAS)
-          const inventoryId = item.inventory_id
-          let stockFull = item.available_quantity || 0
-          let stockTransito = 0
-
-          // Método 2: Si hay inventory_id, intentar obtener detalle adicional
-          if (inventoryId) {
-            try {
-              const stockResponse = await fetch(
-                `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-              )
-
-              if (stockResponse.ok) {
-                const stockData = await stockResponse.json()
-                // Usar el valor del inventario si está disponible
-                if (stockData.available_quantity !== undefined) {
-                  stockFull = stockData.available_quantity
+                if (variation.attributes && Array.isArray(variation.attributes)) {
+                  const skuAttrVar = variation.attributes.find((attr: any) => attr.id === "SELLER_SKU")
+                  if (skuAttrVar && skuAttrVar.value_name) {
+                    skuFromApi = skuAttrVar.value_name
+                    break
+                  }
                 }
-                stockTransito = stockData.in_transit_quantity || 0
               }
-            } catch (stockErr) {
-              // Si falla el endpoint de inventories, ya tenemos stockFull del item
-              console.log(`Usando available_quantity del item para ${item.id}`)
             }
+
+            // Obtener stock de Full
+            // Método 1: Usar available_quantity del item directamente (como GAS)
+            const inventoryId = item.inventory_id
+            let stockFull = item.available_quantity || 0
+            let stockTransito = 0
+
+            // Método 2: Si hay inventory_id, intentar obtener detalle adicional
+            if (inventoryId) {
+              try {
+                const stockResponse = await fetch(
+                  `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                )
+
+                if (stockResponse.ok) {
+                  const stockData = await stockResponse.json()
+                  // Usar el valor del inventario si está disponible
+                  if (stockData.available_quantity !== undefined) {
+                    stockFull = stockData.available_quantity
+                  }
+                  stockTransito = stockData.in_transit_quantity || 0
+                }
+              } catch (stockErr) {
+                // Si falla el endpoint de inventories, ya tenemos stockFull del item
+                console.log(`Usando available_quantity del item para ${item.id}`)
+              }
+            }
+
+            // ============================================
+            // LÓGICA GAS: Preservar datos existentes si el nuevo valor es null
+            // ============================================
+            // Primero obtenemos el registro existente
+            const { data: existingRecord } = await supabase
+              .from('publicaciones_meli')
+              .select('sku, id_inventario')
+              .eq('id_publicacion', item.id)
+              .single()
+
+            // Usamos el valor nuevo SOLO si no es null, sino preservamos el existente
+            // Esto replica: row[0] = datosApi.sku || row[0] de la GAS
+            const finalSku = skuFromApi || existingRecord?.sku || null
+            const finalInventoryId = inventoryId || existingRecord?.id_inventario || null
+
+            // Actualizar en Supabase
+            const { error } = await supabase
+              .from('publicaciones_meli')
+              .upsert({
+                id_publicacion: item.id,
+                sku: finalSku,                    // Preserva existente si API devuelve null
+                titulo: item.title,
+                stock_full: stockFull,
+                stock_transito: stockTransito,
+                id_inventario: finalInventoryId,  // Preserva existente si API devuelve null
+                tipo_logistica: 'fulfillment',
+                precio: item.price,
+                estado: item.status,
+                ultima_sync: new Date().toISOString()
+              }, { onConflict: 'id_publicacion' })
+
+            if (!error) updated++
           }
 
-          // ============================================
-          // LÓGICA GAS: Preservar datos existentes si el nuevo valor es null
-          // ============================================
-          // Primero obtenemos el registro existente
-          const { data: existingRecord } = await supabase
-            .from('publicaciones_meli')
-            .select('sku, id_inventario')
-            .eq('id_publicacion', item.id)
-            .single()
-
-          // Usamos el valor nuevo SOLO si no es null, sino preservamos el existente
-          // Esto replica: row[0] = datosApi.sku || row[0] de la GAS
-          const finalSku = skuFromApi || existingRecord?.sku || null
-          const finalInventoryId = inventoryId || existingRecord?.id_inventario || null
-
-          // Actualizar en Supabase
-          const { error } = await supabase
-            .from('publicaciones_meli')
-            .upsert({
-              id_publicacion: item.id,
-              sku: finalSku,                    // Preserva existente si API devuelve null
-              titulo: item.title,
-              stock_full: stockFull,
-              stock_transito: stockTransito,
-              id_inventario: finalInventoryId,  // Preserva existente si API devuelve null
-              tipo_logistica: 'fulfillment',
-              precio: item.price,
-              estado: item.status,
-              ultima_sync: new Date().toISOString()
-            }, { onConflict: 'id_publicacion' })
-
-          if (!error) updated++
-
-        } catch (itemError) {
-          console.error(`Error procesando item ${itemId}:`, itemError)
+        } catch (batchError) {
+          console.error(`Error procesando batch:`, batchError)
         }
       }
 
@@ -295,10 +308,33 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
 
   const existingIds = new Set((existingOrders || []).map((o: any) => String(o.id_orden)))
 
-  // Fecha desde (default: últimos 30 días)
-  const desde = fechaDesde
-    ? new Date(fechaDesde)
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  // ============================================
+  // SYNC INCREMENTAL: Buscar desde última orden existente
+  // Si no hay fechaDesde explícita, consultamos la fecha más reciente en Supabase
+  // ============================================
+  let desde: Date
+
+  if (fechaDesde) {
+    desde = new Date(fechaDesde)
+  } else {
+    // Obtener la fecha de la orden más reciente
+    const { data: ultimaOrden } = await supabase
+      .from('ordenes_meli')
+      .select('fecha_creacion')
+      .order('fecha_creacion', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (ultimaOrden?.fecha_creacion) {
+      // Restar 1 hora como margen de seguridad por diferencias de timezone
+      desde = new Date(new Date(ultimaOrden.fecha_creacion).getTime() - 60 * 60 * 1000)
+      console.log(`Sync incremental desde: ${desde.toISOString()} (última orden + margen)`)
+    } else {
+      // Primera vez: últimos 30 días
+      desde = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      console.log('Primera sincronización: últimos 30 días')
+    }
+  }
 
   try {
     while (true) {

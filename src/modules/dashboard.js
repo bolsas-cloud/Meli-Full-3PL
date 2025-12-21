@@ -695,23 +695,28 @@ export const moduloDashboard = {
             btn.classList.add('opacity-50', 'cursor-not-allowed');
             icon.classList.add('fa-spin');
 
-            mostrarNotificacion('Sincronizando con Mercado Libre...', 'info');
+            mostrarNotificacion('Sincronizando ordenes desde Mercado Libre...', 'info');
 
-            // Llamar a la Edge Function
+            // Llamar a la Edge Function - Solo ordenes para el Dashboard
+            // (sync incremental desde ultima orden existente)
             const { data, error } = await supabase.functions.invoke('sync-meli', {
-                body: { action: 'sync-all' }
+                body: { action: 'sync-orders' }
             });
 
             if (error) throw error;
 
             // Mostrar resultado
-            const ordenes = data?.orders?.nuevas || 0;
-            const inventario = data?.inventory?.updated || 0;
+            const ordenes = data?.nuevas || 0;
+            const total = data?.total || 0;
 
-            mostrarNotificacion(
-                `Sincronizacion completada: ${ordenes} ordenes nuevas, ${inventario} items actualizados`,
-                'success'
-            );
+            if (ordenes > 0) {
+                mostrarNotificacion(
+                    `Sincronizacion completada: ${ordenes} ordenes nuevas de ${total} revisadas`,
+                    'success'
+                );
+            } else {
+                mostrarNotificacion('Sin ordenes nuevas', 'info');
+            }
 
             // Recargar datos del dashboard
             await moduloDashboard.cargarDatos();
