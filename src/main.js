@@ -3,6 +3,7 @@
 // ============================================
 import { router } from './router.js';
 import { supabase } from './config.js';
+import { moduloAuth } from './modules/auth.js';
 
 // Inicialización cuando el DOM está listo
 document.addEventListener('DOMContentLoaded', async () => {
@@ -19,6 +20,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) {
         console.error('Error conectando con Supabase:', e);
     }
+
+    // Inicializar módulo de autenticación y actualizar UI
+    await moduloAuth.actualizarUI();
 
     // Navegar a la vista inicial (Calculadora de Envíos)
     router.navegar('calculadora');

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conectando con Mercado Libre...</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+
+    <div class="bg-white rounded-xl shadow-lg p-8 max-w-md w-full mx-4 text-center">
+
+        <div id="loading" class="py-8">
+            <i class="fas fa-circle-notch fa-spin fa-3x text-green-500 mb-4"></i>
+            <h1 class="text-xl font-bold text-gray-800 mb-2">Conectando con Mercado Libre</h1>
+            <p class="text-gray-500">Por favor espera...</p>
+        </div>
+
+        <div id="success" class="py-8 hidden">
+            <i class="fas fa-check-circle fa-3x text-green-500 mb-4"></i>
+            <h1 class="text-xl font-bold text-gray-800 mb-2">¡Conexión exitosa!</h1>
+            <p class="text-gray-500 mb-4">Tu cuenta de Mercado Libre ha sido vinculada.</p>
+            <p class="text-sm text-gray-400">Redirigiendo...</p>
+        </div>
+
+        <div id="error" class="py-8 hidden">
+            <i class="fas fa-times-circle fa-3x text-red-500 mb-4"></i>
+            <h1 class="text-xl font-bold text-gray-800 mb-2">Error de conexión</h1>
+            <p class="text-red-500 mb-4" id="error-message">Ocurrió un error</p>
+            <button onclick="window.location.href='index.html'"
+                    class="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors">
+                Volver al inicio
+            </button>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Configuración (debe coincidir con config.js)
+        const SUPABASE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwd3NkcHp4emhsbW96emFzbnF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyNzgzNDAsImV4cCI6MjA4MTg1NDM0MH0.yPjNhAdJ71UFGbT5l1R96ZbxPr3C5_zKtqNNKMUmvzk';
+
+        const MELI_CONFIG = {
+            APP_ID: '4370336012652573',
+            CLIENT_SECRET: 'LXRXjcqrcWxDemTEv7Iq8GVIMBOsUZzB',
+            REDIRECT_URI: 'https://meli-full-3pl.vercel.app/callback.html',
+            TOKEN_URL: 'https://api.mercadolibre.com/oauth/token'
+        };
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // Elementos UI
+        const loadingEl = document.getElementById('loading');
+        const successEl = document.getElementById('success');
+        const errorEl = document.getElementById('error');
+        const errorMsgEl = document.getElementById('error-message');
+
+        function showError(message) {
+            loadingEl.classList.add('hidden');
+            errorEl.classList.remove('hidden');
+            errorMsgEl.textContent = message;
+        }
+
+        function showSuccess() {
+            loadingEl.classList.add('hidden');
+            successEl.classList.remove('hidden');
+
+            // Redirigir después de 2 segundos
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 2000);
+        }
+
+        async function procesarCallback() {
+            try {
+                // Obtener parámetros de la URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const code = urlParams.get('code');
+                const error = urlParams.get('error');
+
+                // Verificar si hubo error en la autorización
+                if (error) {
+                    showError('Autorización denegada: ' + error);
+                    return;
+                }
+
+                // Verificar que hay código
+                if (!code) {
+                    showError('No se recibió código de autorización');
+                    return;
+                }
+
+                console.log('Código recibido, intercambiando por token...');
+
+                // Intercambiar código por token
+                const response = await fetch(MELI_CONFIG.TOKEN_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Accept': 'application/json'
+                    },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: MELI_CONFIG.APP_ID,
+                        client_secret: MELI_CONFIG.CLIENT_SECRET,
+                        code: code,
+                        redirect_uri: MELI_CONFIG.REDIRECT_URI
+                    })
+                });
+
+                const tokenData = await response.json();
+
+                if (tokenData.error) {
+                    showError(tokenData.message || tokenData.error);
+                    return;
+                }
+
+                console.log('Token obtenido, guardando...');
+
+                // Guardar tokens en Supabase
+                const configs = [
+                    { clave: 'access_token', valor: tokenData.access_token },
+                    { clave: 'refresh_token', valor: tokenData.refresh_token },
+                    { clave: 'user_id', valor: String(tokenData.user_id) },
+                    { clave: 'token_expira', valor: String(Date.now() + (tokenData.expires_in * 1000)) }
+                ];
+
+                for (const config of configs) {
+                    const { error } = await supabase
+                        .from('config_meli')
+                        .upsert(config, { onConflict: 'clave' });
+
+                    if (error) {
+                        console.error('Error guardando:', config.clave, error);
+                    }
+                }
+
+                // Obtener nickname del usuario
+                const userResponse = await fetch('https://api.mercadolibre.com/users/me', {
+                    headers: {
+                        'Authorization': `Bearer ${tokenData.access_token}`
+                    }
+                });
+
+                const userData = await userResponse.json();
+
+                if (userData.nickname) {
+                    await supabase
+                        .from('config_meli')
+                        .upsert({ clave: 'user_nickname', valor: userData.nickname }, { onConflict: 'clave' });
+                }
+
+                console.log('Conexión exitosa!');
+                showSuccess();
+
+            } catch (err) {
+                console.error('Error en callback:', err);
+                showError(err.message || 'Error desconocido');
+            }
+        }
+
+        // Ejecutar al cargar
+        procesarCallback();
+    </script>
+
+</body>
+</html>

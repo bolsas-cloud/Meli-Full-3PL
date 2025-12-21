@@ -6,12 +6,14 @@ const CACHE_NAME = 'meli-full-3pl-v1';
 const ASSETS_TO_CACHE = [
     '/',
     '/index.html',
+    '/callback.html',
     '/manifest.json',
     '/src/main.js',
     '/src/config.js',
     '/src/router.js',
     '/src/utils.js',
-    '/src/modules/calculadoraEnvios.js'
+    '/src/modules/calculadoraEnvios.js',
+    '/src/modules/auth.js'
 ];
 
 // Instalación
