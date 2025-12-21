@@ -24,6 +24,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Inicializar módulo de autenticación y actualizar UI
     await moduloAuth.actualizarUI();
 
-    // Navegar a la vista inicial (Calculadora de Envíos)
-    router.navegar('calculadora');
+    // Navegar a la vista inicial (Dashboard)
+    router.navegar('dashboard');
 });
