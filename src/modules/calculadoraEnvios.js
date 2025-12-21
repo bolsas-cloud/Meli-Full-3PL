@@ -341,55 +341,26 @@ export const moduloCalculadora = {
             const Z = parseFloat(document.getElementById('param-servicio').value) || 1.65;
             const incremento = parseFloat(document.getElementById('param-evento').value) || 0;
 
-            // ========== PREFERENCIA: Usar RPC de PostgreSQL ==========
-            // Los cálculos se hacen en la base de datos (más eficiente)
-            const { data: datosRPC, error: errorRPC } = await supabase.rpc('calcular_sugerencias_envio', {
-                p_fecha_colecta: fechaColectaStr,
-                p_tiempo_transito: Tt,
-                p_frecuencia_envio: Fe,
-                p_nivel_servicio_z: Z,
-                p_incremento_evento: incremento
-            });
+            // ========== CALCULAR EN JAVASCRIPT ==========
+            // Usamos JS porque tiene la lógica de fallback ventas_90d / 90
+            const fechaColecta = new Date(fechaColectaStr + 'T00:00:00');
 
-            if (!errorRPC && datosRPC && datosRPC.length > 0) {
-                // Usar datos del RPC (cálculos hechos en PostgreSQL)
-                sugerencias = datosRPC.map(r => ({
-                    id_publicacion: r.id_publicacion,
-                    sku: r.sku,
-                    titulo: r.titulo,
-                    ventas_dia: parseFloat(r.ventas_dia) || 0,
-                    stock_actual_full: r.stock_full || 0,
-                    stock_en_transito: r.stock_transito || 0,
-                    stock_proyectado: parseFloat(r.stock_proyectado) || 0,
-                    stock_seguridad: r.stock_seguridad || 0,
-                    dias_cobertura: parseFloat(r.dias_cobertura) || 0,
-                    cantidad_a_enviar: r.cantidad_a_enviar || 0,
-                    nivel_riesgo: r.nivel_riesgo || 'OK',
-                    id_inventario: r.id_inventario
-                }));
-                console.log('✓ Cálculos ejecutados en PostgreSQL (RPC)');
+            const { data: productosReales, error } = await supabase
+                .from('publicaciones_meli')
+                .select('id_publicacion, sku, titulo, ventas_90d, stock_full, stock_transito, ventas_dia, desviacion, id_inventario')
+                .eq('tipo_logistica', 'fulfillment')
+                .order('ventas_90d', { ascending: false });
+
+            if (error) throw error;
+
+            console.log(`Productos fulfillment encontrados: ${productosReales?.length || 0}`);
+
+            if (productosReales && productosReales.length > 0) {
+                sugerencias = moduloCalculadora.calcularSugerenciasJS(productosReales, Tt, Fe, Z, incremento, fechaColecta);
                 mostrarNotificacion(`${sugerencias.length} productos analizados`, 'success');
             } else {
-                // ========== FALLBACK: Calcular en JavaScript ==========
-                console.warn('RPC no disponible, calculando en JS:', errorRPC?.message);
-
-                const fechaColecta = new Date(fechaColectaStr + 'T00:00:00');
-
-                const { data: productosReales, error } = await supabase
-                    .from('publicaciones_meli')
-                    .select('id_publicacion, sku, titulo, ventas_90d, stock_full, stock_transito, ventas_dia, desviacion, id_inventario')
-                    .eq('tipo_logistica', 'fulfillment')
-                    .order('ventas_90d', { ascending: false });
-
-                if (error) throw error;
-
-                if (productosReales && productosReales.length > 0) {
-                    sugerencias = moduloCalculadora.calcularSugerenciasJS(productosReales, Tt, Fe, Z, incremento, fechaColecta);
-                    mostrarNotificacion(`${sugerencias.length} productos (cálculo local)`, 'info');
-                } else {
-                    sugerencias = moduloCalculadora.generarDatosDemo(Tt, Fe, Z, incremento, fechaColecta);
-                    mostrarNotificacion('Usando datos de demostración. Importa datos reales.', 'info');
-                }
+                sugerencias = moduloCalculadora.generarDatosDemo(Tt, Fe, Z, incremento, fechaColecta);
+                mostrarNotificacion('No hay productos fulfillment. Usando demo.', 'warning');
             }
 
             // Pintar tabla
