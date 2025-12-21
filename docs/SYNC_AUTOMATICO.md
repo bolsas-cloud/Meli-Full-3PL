@@ -10,12 +10,14 @@ La sincronizacion se puede ejecutar:
 
 ## Configuracion del Cron Automatico
 
-### Horario Propuesto
+### Horario Configurado
 
 | Horario | Frecuencia | Uso |
 |---------|------------|-----|
-| Lunes-Viernes 9:00-18:00 | Cada 30 min | Horario comercial intensivo |
-| Resto del tiempo | 6:00 AM diario | Actualizacion nocturna |
+| Lunes-Viernes 8:00-21:00 | Cada 30 min | Horario comercial intensivo |
+| Todos los dias 6:00 AM | Una vez | Actualizacion matutina |
+
+**Nota:** Horarios en Argentina (UTC-3). Ver `supabase/cron_sync_meli.sql` para script completo.
 
 ### Opcion 1: cron-job.org (Gratis)
 

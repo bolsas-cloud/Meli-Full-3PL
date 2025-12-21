@@ -229,9 +229,20 @@ config_meli (clave PK)
 
 **ordenes_meli:**
 - `id_orden` (PK) - ID de la orden
-- `fecha_pago` - Fecha de pago (puede ser NULL)
+- `id_item` - ID de la publicacion (MLA...)
+- `sku` - SKU del producto
+- `titulo_item` - Titulo del producto
+- `cantidad` - Cantidad vendida
+- `precio_unitario` - Precio unitario de lista
+- `total_lista` - cantidad * precio_unitario
 - `fecha_creacion` - Fecha de creacion
-- `neto_recibido` - Monto neto despues de comisiones
+- `fecha_pago` - Fecha de pago (puede ser NULL)
+- `id_pago` - ID del pago de ML
+- `neto_recibido` - Monto neto despues de comisiones (via /collections API)
+- `costo_meli` - Comisiones + envio de ML
+- `pct_costo_meli` - % que representa costo_meli sobre total_lista
+- `estado` - Estado de la orden
+- `comprador_nickname` - Nickname del comprador
 
 ---
 
