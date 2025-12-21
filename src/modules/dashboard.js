@@ -86,7 +86,8 @@ export const moduloDashboard = {
                                 <i class="fas fa-clock mr-1"></i>
                                 Cargando...
                             </span>
-                            <button onclick="moduloDashboard.sincronizarDatos()"
+                            <button type="button"
+                                    onclick="moduloDashboard.sincronizarDatos()"
                                     id="btn-sync"
                                     class="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
                                     title="Sincronizar ordenes y stock desde Mercado Libre">
