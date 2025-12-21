@@ -4,8 +4,8 @@
     "description": "Gestión de logística y stock para Mercado Libre",
     "start_url": "/index.html",
     "display": "standalone",
-    "background_color": "#3483FA",
-    "theme_color": "#FFE600",
+    "background_color": "#4EAB87",
+    "theme_color": "#4EAB87",
     "orientation": "portrait-primary",
     "icons": [
         {

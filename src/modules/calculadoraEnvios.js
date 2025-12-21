@@ -25,7 +25,7 @@ export const moduloCalculadora = {
                 <!-- Panel de Configuración -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <i class="fas fa-sliders-h text-brand-blue"></i>
+                        <i class="fas fa-sliders-h text-brand"></i>
                         Parámetros de Cálculo
                     </h3>
 
@@ -36,7 +36,7 @@ export const moduloCalculadora = {
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Días que tarda el envío en llegar a Full"></i>
                             </label>
                             <input type="number" id="param-transito" value="3" min="1" max="15"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-blue focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
 
                         <div>
@@ -45,7 +45,7 @@ export const moduloCalculadora = {
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Cada cuántos días envías a Full"></i>
                             </label>
                             <input type="number" id="param-frecuencia" value="7" min="1" max="30"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-blue focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
 
                         <div>
@@ -54,7 +54,7 @@ export const moduloCalculadora = {
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Confiabilidad del stock de seguridad"></i>
                             </label>
                             <select id="param-servicio"
-                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-blue focus:border-transparent">
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
                                 <option value="1.28">90% - Relajado</option>
                                 <option value="1.65" selected>95% - Estándar</option>
                                 <option value="2.33">99% - Conservador</option>
@@ -67,13 +67,13 @@ export const moduloCalculadora = {
                                 <i class="fas fa-info-circle text-gray-400 ml-1" title="Incremento por evento especial próximo"></i>
                             </label>
                             <input type="number" id="param-evento" value="0" min="0" max="200"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-blue focus:border-transparent">
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
                         </div>
                     </div>
 
                     <div class="mt-4 flex gap-3">
                         <button onclick="moduloCalculadora.calcular()"
-                                class="bg-brand-blue text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center gap-2">
+                                class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2">
                             <i class="fas fa-calculator"></i>
                             Calcular Sugerencias
                         </button>
@@ -115,7 +115,7 @@ export const moduloCalculadora = {
                                 Seleccionar Críticos
                             </button>
                             <button onclick="moduloCalculadora.registrarEnvio()"
-                                    class="text-sm bg-brand-blue text-white px-4 py-1 rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-1"
+                                    class="text-sm bg-brand text-white px-4 py-1 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-1"
                                     id="btn-registrar" disabled>
                                 <i class="fas fa-truck"></i>
                                 Registrar Envío
@@ -301,7 +301,7 @@ export const moduloCalculadora = {
         }
 
         tbody.innerHTML = sugerencias.map(s => `
-            <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(s.sku) ? 'bg-blue-50' : ''}">
+            <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(s.sku) ? 'bg-brand-light' : ''}">
                 <td class="px-4 py-3">
                     <input type="checkbox"
                            ${productosSeleccionados.has(s.sku) ? 'checked' : ''}

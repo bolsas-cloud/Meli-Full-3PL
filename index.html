@@ -6,7 +6,7 @@
     <title>Meli Full 3PL</title>
 
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#FFE600" />
+    <meta name="theme-color" content="#4EAB87" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Meli Full" />
@@ -21,11 +21,10 @@
                 extend: {
                     colors: {
                         brand: {
-                            DEFAULT: '#FFE600',    // Amarillo Mercado Libre
-                            dark: '#E6CF00',       // Hover
-                            light: '#FFFBEB',      // Fondo
-                            blue: '#3483FA',       // Azul ML
-                            text: '#333333'
+                            DEFAULT: '#4EAB87',    // Verde corporativo
+                            dark: '#3d8c6c',       // Hover
+                            light: '#f0f9f6',      // Fondo
+                            text: '#2c3e50'
                         }
                     },
                     fontFamily: {
@@ -60,7 +59,7 @@
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
 
     <!-- Sidebar -->
-    <aside class="w-64 bg-brand-blue text-white flex-shrink-0 flex flex-col shadow-xl z-20 transition-all duration-300" id="sidebar">
+    <aside class="w-64 bg-brand text-white flex-shrink-0 flex flex-col shadow-xl z-20 transition-all duration-300" id="sidebar">
 
         <div class="p-6 border-b border-white/20">
             <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
@@ -146,7 +145,7 @@
                     <p class="text-sm font-bold text-gray-700">No conectado</p>
                     <p class="text-xs text-gray-500">Mercado Libre</p>
                 </div>
-                <button onclick="router.navegar('config')" class="h-10 w-10 rounded-full bg-brand-light text-brand-blue flex items-center justify-center font-bold border border-brand-blue hover:bg-brand transition-colors">
+                <button onclick="router.navegar('config')" class="h-10 w-10 rounded-full bg-brand-light text-brand flex items-center justify-center font-bold border border-brand hover:bg-brand hover:text-white transition-colors">
                     <i class="fas fa-user"></i>
                 </button>
             </div>
