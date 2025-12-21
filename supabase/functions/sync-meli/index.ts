@@ -24,7 +24,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    const { action, fechaDesde } = await req.json()
+    const { action, fechaDesde, productos } = await req.json()
 
     // Obtener token de ML desde config_meli (donde lo guarda el frontend)
     const { data: tokenData, error: tokenError } = await supabase
@@ -93,6 +93,12 @@ serve(async (req) => {
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
+
+      case 'sync-prices':
+        return await syncPrices(supabase, accessToken, finalSellerId)
+
+      case 'update-prices':
+        return await updatePrices(supabase, accessToken, productos)
 
       default:
         return new Response(
@@ -456,4 +462,211 @@ async function getSellerIdFromToken(accessToken: string): Promise<string> {
   })
   const data = await response.json()
   return String(data.id)
+}
+
+// ============================================
+// SINCRONIZAR PRECIOS (Obtener precios y comisiones de ML)
+// Replica la lógica de GAS: obtiene precio, categoria, tipo_publicacion
+// y luego llama a /sites/MLA/listing_prices para obtener comisiones
+// ============================================
+async function syncPrices(supabase: any, accessToken: string, sellerId: string) {
+  let updated = 0
+  let offset = 0
+  const limit = 50
+
+  try {
+    // Obtener todos los items activos y pausados
+    while (true) {
+      const response = await fetch(
+        `${ML_API_BASE}/users/${sellerId}/items/search?status=active,paused&offset=${offset}&limit=${limit}`,
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      )
+
+      if (!response.ok) break
+
+      const data = await response.json()
+      const itemIds = data.results || []
+
+      if (itemIds.length === 0) break
+
+      // Obtener precio y comisiones de cada item
+      for (const itemId of itemIds) {
+        try {
+          const itemResponse = await fetch(
+            `${ML_API_BASE}/items/${itemId}`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          )
+
+          if (!itemResponse.ok) continue
+
+          const item = await itemResponse.json()
+
+          // Datos base a actualizar
+          const updateData: any = {
+            precio: item.price,
+            estado: item.status,
+            categoria_id: item.category_id,
+            tipo_publicacion: item.listing_type_id,
+            ultima_sync: new Date().toISOString()
+          }
+
+          // Obtener comisiones desde /sites/MLA/listing_prices (igual que GAS)
+          if (item.category_id && item.listing_type_id && item.price > 0) {
+            const siteId = item.category_id.substring(0, 3) // MLA, MLB, etc
+            const feesUrl = `${ML_API_BASE}/sites/${siteId}/listing_prices?price=${item.price}&listing_type_id=${item.listing_type_id}&category_id=${item.category_id}`
+
+            try {
+              const feesResponse = await fetch(feesUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              })
+
+              if (feesResponse.ok) {
+                const feesData = await feesResponse.json()
+
+                if (feesData.sale_fee_details) {
+                  const cargoFijo = feesData.sale_fee_details.fixed_fee || 0
+                  const comisionTotal = feesData.sale_fee_amount || 0
+                  const comision = comisionTotal - cargoFijo
+                  const impuestos = feesData.taxes_amount || 0
+
+                  updateData.cargo_fijo_ml = cargoFijo
+                  updateData.comision_ml = comision
+                  updateData.impuestos_estimados = impuestos
+
+                  // Calcular neto estimado (precio - comision - cargo_fijo - impuestos)
+                  // Nota: costo_envio_ml no viene de este endpoint, se deja como está
+                  const costoEnvio = 0 // TODO: obtener de shipping si es necesario
+                  updateData.neto_estimado = item.price - comision - cargoFijo - costoEnvio - impuestos
+                }
+              }
+            } catch (feeError) {
+              console.error(`Error obteniendo fees de ${itemId}:`, feeError)
+              // Continuamos sin las comisiones
+            }
+          }
+
+          // Actualizar en Supabase
+          const { error } = await supabase
+            .from('publicaciones_meli')
+            .update(updateData)
+            .eq('id_publicacion', item.id)
+
+          if (!error) updated++
+
+        } catch (itemError) {
+          console.error(`Error obteniendo precio de ${itemId}:`, itemError)
+        }
+      }
+
+      offset += limit
+      if (offset >= (data.paging?.total || 0)) break
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, updated }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error en syncPrices:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message, updated }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// ============================================
+// ACTUALIZAR PRECIOS (Enviar nuevos precios a ML)
+// ============================================
+interface ProductoActualizar {
+  itemId: string
+  sku: string
+  precioAnterior: number
+  nuevoPrecio: number
+}
+
+async function updatePrices(supabase: any, accessToken: string, productos: ProductoActualizar[]) {
+  if (!productos || productos.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'No se recibieron productos para actualizar' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const resultados = {
+    exitosos: [] as { itemId: string, sku: string, nuevoPrecio: number }[],
+    fallidos: [] as { itemId: string, sku: string, error: string }[]
+  }
+
+  for (const prod of productos) {
+    try {
+      // Actualizar en Mercado Libre
+      const response = await fetch(`${ML_API_BASE}/items/${prod.itemId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ price: prod.nuevoPrecio })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        let errorMessage = 'Error desconocido'
+
+        if (errorData.cause && errorData.cause.length > 0) {
+          errorMessage = errorData.cause[0].message || errorData.message
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+
+        resultados.fallidos.push({
+          itemId: prod.itemId,
+          sku: prod.sku,
+          error: errorMessage
+        })
+        continue
+      }
+
+      // Actualizar en Supabase
+      await supabase
+        .from('publicaciones_meli')
+        .update({ precio: prod.nuevoPrecio })
+        .eq('id_publicacion', prod.itemId)
+
+      // Guardar en historial
+      await supabase
+        .from('historial_cambio_precios')
+        .insert({
+          item_id: prod.itemId,
+          sku: prod.sku,
+          precio_anterior: prod.precioAnterior,
+          precio_nuevo: prod.nuevoPrecio
+        })
+
+      resultados.exitosos.push({
+        itemId: prod.itemId,
+        sku: prod.sku,
+        nuevoPrecio: prod.nuevoPrecio
+      })
+
+    } catch (error) {
+      console.error(`Error actualizando precio de ${prod.itemId}:`, error)
+      resultados.fallidos.push({
+        itemId: prod.itemId,
+        sku: prod.sku,
+        error: (error as Error).message
+      })
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: resultados.fallidos.length === 0,
+      exitos: resultados.exitosos.length,
+      fallidos: resultados.fallidos
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
 }

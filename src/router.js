@@ -5,7 +5,7 @@ import { moduloCalculadora } from './modules/calculadoraEnvios.js';
 import { moduloEnviosCreados } from './modules/enviosCreados.js';
 import { moduloDashboard } from './modules/dashboard.js';
 // import { moduloStock } from './modules/stock.js';
-// import { moduloPrecios } from './modules/precios.js';
+import { moduloPrecios } from './modules/precios.js';
 
 export const router = {
 
@@ -56,9 +56,9 @@ export const router = {
             //     moduloStock.render(appContent);
             //     break;
 
-            // case 'precios':
-            //     moduloPrecios.render(appContent);
-            //     break;
+            case 'precios':
+                moduloPrecios.render(appContent);
+                break;
 
             default:
                 appContent.innerHTML = `

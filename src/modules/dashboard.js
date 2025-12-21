@@ -460,7 +460,6 @@ export const moduloDashboard = {
                         pointBackgroundColor: 'rgba(249, 115, 22, 1)',
                         fill: true,
                         tension: 0.3,
-                        yAxisID: 'y1',
                         order: 1
                     }
                 ]
@@ -501,30 +500,14 @@ export const moduloDashboard = {
                         position: 'left',
                         title: {
                             display: true,
-                            text: 'Ventas ($)'
-                        },
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + (value / 1000).toFixed(0) + 'k';
-                            }
-                        }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        title: {
-                            display: true,
-                            text: 'Publicidad ($)'
+                            text: 'Monto ($)'
                         },
                         ticks: {
                             callback: function(value) {
                                 return '$' + (value / 1000).toFixed(0) + 'k';
                             }
                         },
-                        grid: {
-                            drawOnChartArea: false
-                        }
+                        beginAtZero: true
                     }
                 }
             }
