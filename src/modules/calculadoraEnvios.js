@@ -762,8 +762,8 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // CALCULAR VENTAS DIARIAS: Fallback en JavaScript
-    // Agrupa órdenes de los últimos 90 días y calcula promedio por SKU
+    // CALCULAR VENTAS DIARIAS: Réplica EXACTA de GAS procesarVentasHistoricas()
+    // Agrupa órdenes por SKU y por DÍA, calcula V y σ sobre 90 valores diarios
     // ============================================
     calcularVentasDiariasJS: async () => {
         const DIAS_EVALUACION = 90;
@@ -773,7 +773,6 @@ export const moduloCalculadora = {
             const fechaDesde = new Date();
             fechaDesde.setDate(fechaDesde.getDate() - DIAS_EVALUACION);
 
-            // NOTA: La columna es fecha_creacion, NO fecha_orden
             const { data: ordenes, error } = await supabase
                 .from('ordenes_meli')
                 .select('sku, cantidad, fecha_creacion, id_item')
@@ -781,85 +780,94 @@ export const moduloCalculadora = {
 
             if (error) {
                 console.error('Error consultando órdenes:', error);
-                return;
+                return {};
             }
 
             if (!ordenes || ordenes.length === 0) {
                 console.log('No hay órdenes en los últimos 90 días');
-                return;
+                return {};
             }
 
-            console.log(`Procesando ${ordenes.length} órdenes para calcular ventas...`);
+            console.log(`[GAS-REPLICA] Procesando ${ordenes.length} órdenes (${DIAS_EVALUACION} días)...`);
 
-            // Agrupar por SKU y por id_item (MLA...) para calcular totales
-            const ventasPorSku = {};
-            const ventasPorItem = {};
+            // ========== PASO 1: Agrupar por SKU y por DÍA (igual que GAS líneas 64-84) ==========
+            // Estructura: { sku: { ventas: { 'YYYY-MM-DD': cantidad }, titulo: '' } }
+            const ventasPorSkuPorDia = {};
 
             ordenes.forEach(orden => {
-                // Por SKU (si está disponible)
-                if (orden.sku) {
-                    if (!ventasPorSku[orden.sku]) {
-                        ventasPorSku[orden.sku] = { total: 0, ordenes: [] };
-                    }
-                    ventasPorSku[orden.sku].total += orden.cantidad || 1;
-                    ventasPorSku[orden.sku].ordenes.push(orden.cantidad || 1);
-                }
+                if (!orden.sku || !orden.fecha_creacion) return;
 
-                // Por id_item (MLA...) siempre
-                if (orden.id_item) {
-                    if (!ventasPorItem[orden.id_item]) {
-                        ventasPorItem[orden.id_item] = { total: 0, ordenes: [] };
-                    }
-                    ventasPorItem[orden.id_item].total += orden.cantidad || 1;
-                    ventasPorItem[orden.id_item].ordenes.push(orden.cantidad || 1);
+                const sku = orden.sku;
+                const fecha = new Date(orden.fecha_creacion);
+                const fechaStr = fecha.toISOString().split('T')[0]; // 'YYYY-MM-DD'
+                const cantidad = parseInt(orden.cantidad) || 1;
+
+                if (!ventasPorSkuPorDia[sku]) {
+                    ventasPorSkuPorDia[sku] = { ventas: {} };
                 }
+                ventasPorSkuPorDia[sku].ventas[fechaStr] =
+                    (ventasPorSkuPorDia[sku].ventas[fechaStr] || 0) + cantidad;
             });
 
-            // Calcular desviación estándar
-            const calcularDesviacion = (ordenes, promedioDiario) => {
-                if (ordenes.length < 2) return promedioDiario * 0.3; // Fallback: 30%
-                const promedio = ordenes.reduce((a, b) => a + b, 0) / ordenes.length;
-                const varianza = ordenes.reduce((acc, val) => acc + Math.pow(val - promedio, 2), 0) / ordenes.length;
-                return Math.sqrt(varianza) || promedioDiario * 0.3;
-            };
+            // ========== PASO 2: Calcular V y σ para cada SKU (igual que GAS líneas 86-106) ==========
+            const resultados = {};
 
-            // Actualizar publicaciones por SKU
+            for (const sku in ventasPorSkuPorDia) {
+                // Crear array de 90 días con ventas de cada día (0 si no hubo ventas)
+                const ventasDiarias = [];
+                let totalUnidades = 0;
+
+                for (let i = 0; i < DIAS_EVALUACION; i++) {
+                    const fechaActual = new Date();
+                    fechaActual.setDate(fechaActual.getDate() - i);
+                    const fechaStr = fechaActual.toISOString().split('T')[0];
+                    const ventasDelDia = ventasPorSkuPorDia[sku].ventas[fechaStr] || 0;
+                    ventasDiarias.push(ventasDelDia);
+                    totalUnidades += ventasDelDia;
+                }
+
+                // Promedio diario (V)
+                const ventasDiariasPromedio = totalUnidades / DIAS_EVALUACION;
+                const media = ventasDiariasPromedio;
+
+                // Varianza poblacional (÷N, igual que GAS línea 100)
+                const varianza = ventasDiarias
+                    .map(x => Math.pow(x - media, 2))
+                    .reduce((a, b) => a + b, 0) / DIAS_EVALUACION;
+
+                // Desvío estándar
+                const desvioEstandar = Math.sqrt(varianza);
+
+                resultados[sku] = {
+                    ventasDiariasPromedio,
+                    desvioEstandar,
+                    totalUnidades
+                };
+            }
+
+            console.log(`[GAS-REPLICA] Calculado V y σ para ${Object.keys(resultados).length} SKUs`);
+
+            // ========== PASO 3: Actualizar publicaciones_meli ==========
             let actualizados = 0;
-            for (const [sku, datos] of Object.entries(ventasPorSku)) {
-                const ventasDia = datos.total / DIAS_EVALUACION;
-                const desviacion = calcularDesviacion(datos.ordenes, ventasDia);
-
+            for (const [sku, datos] of Object.entries(resultados)) {
                 const { error: updateError } = await supabase
                     .from('publicaciones_meli')
                     .update({
-                        ventas_dia: ventasDia,
-                        desviacion: desviacion
+                        ventas_dia: datos.ventasDiariasPromedio,
+                        ventas_90d: datos.totalUnidades,
+                        desviacion: datos.desvioEstandar
                     })
                     .eq('sku', sku);
 
                 if (!updateError) actualizados++;
             }
 
-            // Actualizar publicaciones por id_publicacion (MLA...)
-            for (const [idItem, datos] of Object.entries(ventasPorItem)) {
-                const ventasDia = datos.total / DIAS_EVALUACION;
-                const desviacion = calcularDesviacion(datos.ordenes, ventasDia);
-
-                const { error: updateError } = await supabase
-                    .from('publicaciones_meli')
-                    .update({
-                        ventas_dia: ventasDia,
-                        desviacion: desviacion
-                    })
-                    .eq('id_publicacion', idItem);
-
-                if (!updateError) actualizados++;
-            }
-
-            console.log(`✓ Ventas diarias calculadas: ${actualizados} registros actualizados (${DIAS_EVALUACION} días)`);
+            console.log(`✓ Ventas actualizadas: ${actualizados} registros (${DIAS_EVALUACION} días)`);
+            return resultados;
 
         } catch (err) {
-            console.error('Error calculando ventas diarias en JS:', err);
+            console.error('Error calculando ventas diarias:', err);
+            return {};
         }
     },
 
