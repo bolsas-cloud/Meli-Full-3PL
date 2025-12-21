@@ -154,6 +154,39 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
           const item = await itemResponse.json()
 
+          // Buscar SKU en múltiples lugares (igual que GAS)
+          let skuFromApi = null
+
+          // Prioridad 1: seller_custom_field a nivel item
+          if (item.seller_custom_field) {
+            skuFromApi = item.seller_custom_field
+          }
+
+          // Prioridad 2: SELLER_SKU en atributos principales
+          if (!skuFromApi && item.attributes && Array.isArray(item.attributes)) {
+            const skuAttr = item.attributes.find((attr: any) => attr.id === "SELLER_SKU")
+            if (skuAttr && skuAttr.value_name) {
+              skuFromApi = skuAttr.value_name
+            }
+          }
+
+          // Prioridad 3: SKU en variaciones
+          if (!skuFromApi && item.variations && Array.isArray(item.variations) && item.variations.length > 0) {
+            for (const variation of item.variations) {
+              if (variation.seller_custom_field) {
+                skuFromApi = variation.seller_custom_field
+                break
+              }
+              if (variation.attributes && Array.isArray(variation.attributes)) {
+                const skuAttrVar = variation.attributes.find((attr: any) => attr.id === "SELLER_SKU")
+                if (skuAttrVar && skuAttrVar.value_name) {
+                  skuFromApi = skuAttrVar.value_name
+                  break
+                }
+              }
+            }
+          }
+
           // Obtener stock de Full
           const inventoryId = item.inventory_id
           let stockFull = 0
@@ -172,16 +205,31 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
             }
           }
 
+          // ============================================
+          // LÓGICA GAS: Preservar datos existentes si el nuevo valor es null
+          // ============================================
+          // Primero obtenemos el registro existente
+          const { data: existingRecord } = await supabase
+            .from('publicaciones_meli')
+            .select('sku, id_inventario')
+            .eq('id_publicacion', item.id)
+            .single()
+
+          // Usamos el valor nuevo SOLO si no es null, sino preservamos el existente
+          // Esto replica: row[0] = datosApi.sku || row[0] de la GAS
+          const finalSku = skuFromApi || existingRecord?.sku || null
+          const finalInventoryId = inventoryId || existingRecord?.id_inventario || null
+
           // Actualizar en Supabase
           const { error } = await supabase
             .from('publicaciones_meli')
             .upsert({
               id_publicacion: item.id,
-              sku: item.seller_custom_field || item.seller_sku || null,
+              sku: finalSku,                    // Preserva existente si API devuelve null
               titulo: item.title,
               stock_full: stockFull,
               stock_transito: stockTransito,
-              id_inventario: inventoryId,
+              id_inventario: finalInventoryId,  // Preserva existente si API devuelve null
               tipo_logistica: 'fulfillment',
               precio: item.price,
               estado: item.status,
@@ -259,14 +307,42 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
         if (existingIds.has(orderId)) continue
 
         // Procesar cada item de la orden
-        for (const item of order.order_items || []) {
+        for (const orderItem of order.order_items || []) {
+          const itemId = orderItem.item?.id || null
+
+          // Buscar SKU en múltiples lugares (igual que GAS)
+          let skuFromOrder = null
+
+          // Prioridad 1: seller_sku en el item de la orden
+          if (orderItem.item?.seller_sku) {
+            skuFromOrder = orderItem.item.seller_sku
+          }
+
+          // Prioridad 2: seller_custom_field en el item de la orden
+          if (!skuFromOrder && orderItem.item?.seller_custom_field) {
+            skuFromOrder = orderItem.item.seller_custom_field
+          }
+
+          // Si no tenemos SKU, intentar obtenerlo de publicaciones_meli
+          if (!skuFromOrder && itemId) {
+            const { data: pubData } = await supabase
+              .from('publicaciones_meli')
+              .select('sku')
+              .eq('id_publicacion', itemId)
+              .single()
+
+            if (pubData?.sku) {
+              skuFromOrder = pubData.sku
+            }
+          }
+
           const orderRecord = {
             id_orden: orderId,
-            id_item: item.item?.id || null,
-            sku: item.item?.seller_sku || item.item?.seller_custom_field || null,
-            titulo: item.item?.title || null,
-            cantidad: item.quantity || 1,
-            precio_unitario: item.unit_price || 0,
+            id_item: itemId,
+            sku: skuFromOrder,
+            titulo: orderItem.item?.title || null,
+            cantidad: orderItem.quantity || 1,
+            precio_unitario: orderItem.unit_price || 0,
             fecha_orden: order.date_created,
             estado_orden: order.status,
             comprador_nickname: order.buyer?.nickname || null

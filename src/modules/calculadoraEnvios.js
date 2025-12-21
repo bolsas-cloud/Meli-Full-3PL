@@ -280,6 +280,30 @@ export const moduloCalculadora = {
         // Sincronizar (silencioso - no bloquea si falla)
         await moduloCalculadora.sincronizarDesdeML(true);
 
+        // ========== PASO 1.5: Actualizar ventas diarias desde órdenes ==========
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                    <i class="fas fa-chart-line fa-spin fa-2x mb-2"></i>
+                    <p>Calculando ventas diarias desde órdenes...</p>
+                </td>
+            </tr>
+        `;
+
+        // Intentar actualizar ventas desde órdenes (RPC en DB)
+        try {
+            const { data: ventasUpdated, error: ventasError } = await supabase.rpc('actualizar_ventas_diarias_publicaciones', {
+                p_dias_evaluacion: 30
+            });
+            if (!ventasError && ventasUpdated > 0) {
+                console.log(`✓ Ventas diarias actualizadas para ${ventasUpdated} productos`);
+            }
+        } catch (err) {
+            console.warn('RPC actualizar_ventas_diarias_publicaciones no disponible:', err);
+            // Fallback: calcular localmente en JS
+            await moduloCalculadora.calcularVentasDiariasJS();
+        }
+
         // ========== PASO 2: Calcular sugerencias ==========
         tbody.innerHTML = `
             <tr>
@@ -721,6 +745,65 @@ export const moduloCalculadora = {
             }
             return b.cantidad_a_enviar - a.cantidad_a_enviar;
         });
+    },
+
+    // ============================================
+    // CALCULAR VENTAS DIARIAS: Fallback en JavaScript
+    // Agrupa órdenes de los últimos 30 días y calcula promedio por SKU
+    // ============================================
+    calcularVentasDiariasJS: async () => {
+        const DIAS_EVALUACION = 30;
+
+        try {
+            // Obtener órdenes de los últimos 30 días
+            const fechaDesde = new Date();
+            fechaDesde.setDate(fechaDesde.getDate() - DIAS_EVALUACION);
+
+            const { data: ordenes, error } = await supabase
+                .from('ordenes_meli')
+                .select('sku, cantidad, fecha_orden')
+                .gte('fecha_orden', fechaDesde.toISOString())
+                .not('sku', 'is', null);
+
+            if (error || !ordenes || ordenes.length === 0) {
+                console.log('No hay órdenes para calcular ventas diarias');
+                return;
+            }
+
+            // Agrupar por SKU y calcular totales
+            const ventasPorSku = {};
+            ordenes.forEach(orden => {
+                const sku = orden.sku;
+                if (!ventasPorSku[sku]) {
+                    ventasPorSku[sku] = 0;
+                }
+                ventasPorSku[sku] += orden.cantidad || 1;
+            });
+
+            // Calcular ventas diarias y actualizar publicaciones
+            for (const [sku, totalVentas] of Object.entries(ventasPorSku)) {
+                const ventasDia = totalVentas / DIAS_EVALUACION;
+                const desviacion = ventasDia * 0.3; // Estimación: 30% de variabilidad
+
+                // Actualizar todas las publicaciones con este SKU
+                const { error: updateError } = await supabase
+                    .from('publicaciones_meli')
+                    .update({
+                        ventas_dia: ventasDia,
+                        desviacion: desviacion
+                    })
+                    .eq('sku', sku);
+
+                if (updateError) {
+                    console.warn(`Error actualizando ventas para SKU ${sku}:`, updateError);
+                }
+            }
+
+            console.log(`✓ Ventas diarias calculadas para ${Object.keys(ventasPorSku).length} SKUs (JS fallback)`);
+
+        } catch (err) {
+            console.error('Error calculando ventas diarias en JS:', err);
+        }
     },
 
     // ============================================
