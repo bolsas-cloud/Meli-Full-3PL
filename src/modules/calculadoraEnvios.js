@@ -446,17 +446,25 @@ export const moduloCalculadora = {
             const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
 
             // Días de cobertura actual (sin considerar tránsito)
-            const diasCobertura = V > 0 ? stockFull / V : 999;
+            // GAS: const coberturaActual = (V > 0) ? Sml / V : Infinity;
+            const diasCobertura = V > 0 ? stockFull / V : Infinity;
 
-            // Nivel de riesgo basado en stock proyectado
+            // Nivel de riesgo basado en cobertura vs Lead Time + días hasta colecta
+            // Igual que GAS (Logistica_Full.js líneas 269-273)
             let nivelRiesgo = 'OK';
-            if (stockProyectadoEnColecta < 0 || diasCobertura < 3) {
-                nivelRiesgo = 'CRÍTICO';
-            } else if (stockProyectadoEnColecta < Ss || diasCobertura < 7) {
-                nivelRiesgo = 'BAJO';
-            } else if (diasCobertura < 14) {
-                nivelRiesgo = 'NORMAL';
+            if (V > 0) {
+                // Solo calculamos riesgo para productos con ventas
+                // CRÍTICO: cobertura < tiempo_transito + días_hasta_colecta
+                // RIESGO/BAJO: cobertura < lead_time_total + días_hasta_colecta
+                if (diasCobertura < (Tt + diasHastaColecta)) {
+                    nivelRiesgo = 'CRÍTICO';
+                } else if (diasCobertura < (L + diasHastaColecta)) {
+                    nivelRiesgo = 'BAJO';
+                } else if (diasCobertura < L * 2) {
+                    nivelRiesgo = 'NORMAL';
+                }
             }
+            // Si V = 0 (sin ventas), el riesgo es 'OK' (Normal en GAS)
 
             return {
                 id_publicacion: p.id_publicacion,  // Clave única (MLA...)
@@ -520,7 +528,9 @@ export const moduloCalculadora = {
                 <td class="px-4 py-3 text-right text-gray-500">${s.stock_en_transito || 0}</td>
                 <td class="px-4 py-3 text-right ${stockProyClass}" title="Stock estimado en fecha de colecta">${stockProy}</td>
                 <td class="px-4 py-3 text-right">
-                    <span class="${(s.dias_cobertura || 0) < 3 ? 'text-red-600 font-bold' : ''}">${(s.dias_cobertura || 0).toFixed(1)}</span>
+                    <span class="${(s.dias_cobertura || 0) < 3 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
+                        ${s.dias_cobertura === Infinity ? '∞' : (s.dias_cobertura || 0).toFixed(1)}
+                    </span>
                 </td>
                 <td class="px-4 py-3 text-right">
                     <input type="number"
@@ -721,12 +731,16 @@ export const moduloCalculadora = {
             // Demanda durante período de reposición
             const demandaPeriodo = V * L * factorEvento;
             const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
-            const diasCobertura = p.stock_actual_full / V;
+            // Días de cobertura (igual que la función principal)
+            const diasCobertura = V > 0 ? p.stock_actual_full / V : Infinity;
 
+            // Lógica de riesgo igual que GAS
             let nivelRiesgo = 'OK';
-            if (stockProyectadoEnColecta < 0 || diasCobertura < 3) nivelRiesgo = 'CRÍTICO';
-            else if (stockProyectadoEnColecta < Ss || diasCobertura < 7) nivelRiesgo = 'BAJO';
-            else if (diasCobertura < 14) nivelRiesgo = 'NORMAL';
+            if (V > 0) {
+                if (diasCobertura < (Tt + diasHastaColecta)) nivelRiesgo = 'CRÍTICO';
+                else if (diasCobertura < (L + diasHastaColecta)) nivelRiesgo = 'BAJO';
+                else if (diasCobertura < L * 2) nivelRiesgo = 'NORMAL';
+            }
 
             return {
                 sku: p.sku,

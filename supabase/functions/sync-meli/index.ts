@@ -194,20 +194,30 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
           }
 
           // Obtener stock de Full
+          // Método 1: Usar available_quantity del item directamente (como GAS)
           const inventoryId = item.inventory_id
-          let stockFull = 0
+          let stockFull = item.available_quantity || 0
           let stockTransito = 0
 
+          // Método 2: Si hay inventory_id, intentar obtener detalle adicional
           if (inventoryId) {
-            const stockResponse = await fetch(
-              `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
-              { headers: { 'Authorization': `Bearer ${accessToken}` } }
-            )
+            try {
+              const stockResponse = await fetch(
+                `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              )
 
-            if (stockResponse.ok) {
-              const stockData = await stockResponse.json()
-              stockFull = stockData.available_quantity || 0
-              stockTransito = stockData.in_transit_quantity || 0
+              if (stockResponse.ok) {
+                const stockData = await stockResponse.json()
+                // Usar el valor del inventario si está disponible
+                if (stockData.available_quantity !== undefined) {
+                  stockFull = stockData.available_quantity
+                }
+                stockTransito = stockData.in_transit_quantity || 0
+              }
+            } catch (stockErr) {
+              // Si falla el endpoint de inventories, ya tenemos stockFull del item
+              console.log(`Usando available_quantity del item para ${item.id}`)
             }
           }
 

@@ -735,6 +735,13 @@ export const moduloEnviosCreados = {
 
         moduloEnviosCreados.preparacionActiva = envio;
 
+        // Verificar si hay progreso guardado
+        const progresoGuardado = await moduloEnviosCreados.cargarProgresoGuardado(envio.id_envio);
+        const progresoMap = {};
+        progresoGuardado.forEach(p => {
+            progresoMap[p.sku] = p.cantidad_escaneada || 0;
+        });
+
         // Obtener inventory_id de cada producto desde publicaciones_meli
         const productosConInventory = [];
         for (const prod of envio.productos) {
@@ -750,11 +757,20 @@ export const moduloEnviosCreados = {
             productosConInventory.push({
                 ...prod,
                 inventory_id: inventoryId,
-                cantidad_escaneada: 0
+                // Cargar cantidad escaneada del progreso guardado si existe
+                cantidad_escaneada: progresoMap[prod.sku] || 0
             });
         }
 
         moduloEnviosCreados.productosPreparacion = productosConInventory;
+
+        // Notificar si se cargó progreso
+        if (progresoGuardado.length > 0) {
+            const totalEscaneados = productosConInventory.reduce((sum, p) => sum + (p.cantidad_escaneada || 0), 0);
+            if (totalEscaneados > 0) {
+                mostrarNotificacion(`Progreso recuperado: ${totalEscaneados} unidades escaneadas`, 'info');
+            }
+        }
 
         // Mostrar UI de preparación
         const contenedor = document.getElementById('app-content');
@@ -774,6 +790,10 @@ export const moduloEnviosCreados = {
                             <button onclick="moduloEnviosCreados.cancelarPreparacion()"
                                     class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
                                 <i class="fas fa-times mr-1"></i>Cancelar
+                            </button>
+                            <button onclick="moduloEnviosCreados.guardarProgresoPreparacion()"
+                                    class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                                <i class="fas fa-save mr-1"></i>Guardar y Continuar
                             </button>
                             <button onclick="moduloEnviosCreados.finalizarPreparacion()"
                                     class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors">
@@ -816,7 +836,7 @@ export const moduloEnviosCreados = {
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-28">Inventory ID</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20">A Enviar</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Escaneados</th>
-                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Estado</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-28">Estado</th>
                             </tr>
                         </thead>
                         <tbody id="tabla-preparacion">
@@ -872,8 +892,8 @@ export const moduloEnviosCreados = {
                     <td class="px-4 py-3 text-center text-sm font-mono text-gray-600 w-28">${p.inventory_id || '-'}</td>
                     <td class="px-4 py-3 text-center font-bold text-gray-800 w-20">${requeridos}</td>
                     <td class="px-4 py-3 text-center font-bold text-lg w-24 ${escaneados >= requeridos ? 'text-green-600' : 'text-gray-800'}">${escaneados}</td>
-                    <td class="px-4 py-3 text-center w-24">
-                        <span class="px-2 py-1 rounded-full text-xs font-bold ${estadoClase}">${estadoTexto}</span>
+                    <td class="px-4 py-3 text-center w-28">
+                        <span class="px-2 py-1 rounded-full text-xs font-bold whitespace-nowrap ${estadoClase}">${estadoTexto}</span>
                     </td>
                 </tr>
             `;
@@ -967,6 +987,63 @@ export const moduloEnviosCreados = {
         document.getElementById('foco-contador').innerHTML = `<span class="${escaneados >= requeridos ? 'text-green-600' : 'text-blue-600'}">${escaneados}</span> / ${requeridos}`;
     },
 
+    // ============================================
+    // GUARDAR PROGRESO: Guarda en preparacion_en_curso para continuar después
+    // ============================================
+    guardarProgresoPreparacion: async () => {
+        const envio = moduloEnviosCreados.preparacionActiva;
+        if (!envio) return;
+
+        try {
+            // Eliminar progreso anterior de este envío
+            await supabase
+                .from('preparacion_en_curso')
+                .delete()
+                .eq('id_envio', envio.id_envio);
+
+            // Insertar nuevo progreso
+            const registros = moduloEnviosCreados.productosPreparacion.map(p => ({
+                id_envio: envio.id_envio,
+                sku: p.sku,
+                inventory_id: p.inventory_id || null,
+                titulo: p.titulo || null,
+                cantidad_requerida: p.cantidad_enviada || 0,
+                cantidad_escaneada: p.cantidad_escaneada || 0
+            }));
+
+            const { error } = await supabase
+                .from('preparacion_en_curso')
+                .insert(registros);
+
+            if (error) throw error;
+
+            mostrarNotificacion('Progreso guardado. Podés continuar después.', 'success');
+
+        } catch (error) {
+            console.error('Error guardando progreso:', error);
+            mostrarNotificacion('Error al guardar progreso', 'error');
+        }
+    },
+
+    // ============================================
+    // CARGAR PROGRESO: Recupera progreso guardado si existe
+    // ============================================
+    cargarProgresoGuardado: async (idEnvio) => {
+        try {
+            const { data, error } = await supabase
+                .from('preparacion_en_curso')
+                .select('*')
+                .eq('id_envio', idEnvio);
+
+            if (error) throw error;
+
+            return data || [];
+        } catch (error) {
+            console.error('Error cargando progreso:', error);
+            return [];
+        }
+    },
+
     cancelarPreparacion: async () => {
         const confirmado = await confirmarAccion(
             'Cancelar preparación',
@@ -1013,6 +1090,12 @@ export const moduloEnviosCreados = {
                 .eq('id_envio', envio.id_envio);
 
             if (error) throw error;
+
+            // Limpiar progreso guardado ya que se completó
+            await supabase
+                .from('preparacion_en_curso')
+                .delete()
+                .eq('id_envio', envio.id_envio);
 
             mostrarNotificacion('Preparación finalizada. Envío marcado como Despachado.', 'success');
 
