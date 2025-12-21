@@ -569,7 +569,13 @@ export const moduloEnviosCreados = {
         if (!confirmado) return;
 
         try {
-            // Eliminar detalles primero (FK)
+            // Eliminar progreso de preparación si existe
+            await supabase
+                .from('preparacion_en_curso')
+                .delete()
+                .eq('id_envio', idEnvio);
+
+            // Eliminar detalles (FK)
             await supabase
                 .from('detalle_envios_full')
                 .delete()
@@ -720,6 +726,7 @@ export const moduloEnviosCreados = {
     preparacionActiva: null,
     productosPreparacion: [],
     ultimoSkuFoco: null,
+    cambiosPendientes: false, // Trackea si hay cambios desde el último guardado
 
     iniciarPreparacion: async (idEnvio) => {
         const envio = enviosCache.find(e => e.id_envio === idEnvio);
@@ -763,6 +770,7 @@ export const moduloEnviosCreados = {
         }
 
         moduloEnviosCreados.productosPreparacion = productosConInventory;
+        moduloEnviosCreados.cambiosPendientes = false; // Sin cambios nuevos al iniciar
 
         // Notificar si se cargó progreso
         if (progresoGuardado.length > 0) {
@@ -791,7 +799,8 @@ export const moduloEnviosCreados = {
                                     class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
                                 <i class="fas fa-times mr-1"></i>Cancelar
                             </button>
-                            <button onclick="moduloEnviosCreados.guardarProgresoPreparacion()"
+                            <button id="btn-guardar-salir"
+                                    onclick="moduloEnviosCreados.accionBotonGuardarSalir()"
                                     class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
                                 <i class="fas fa-save mr-1"></i>Guardar y Continuar
                             </button>
@@ -860,9 +869,10 @@ export const moduloEnviosCreados = {
             </div>
         `;
 
-        // Enfocar input
+        // Enfocar input y actualizar estado del botón
         setTimeout(() => {
             document.getElementById('input-escaner')?.focus();
+            moduloEnviosCreados.actualizarBotonGuardar();
         }, 100);
     },
 
@@ -919,6 +929,10 @@ export const moduloEnviosCreados = {
         prod.cantidad_escaneada = (prod.cantidad_escaneada || 0) + 1;
         moduloEnviosCreados.ultimoSkuFoco = prod.sku;
 
+        // Marcar que hay cambios pendientes
+        moduloEnviosCreados.cambiosPendientes = true;
+        moduloEnviosCreados.actualizarBotonGuardar();
+
         moduloEnviosCreados.actualizarUIPreparacion(idx);
         document.getElementById('input-escaner').value = '';
         document.getElementById('input-escaner').focus();
@@ -944,6 +958,10 @@ export const moduloEnviosCreados = {
 
         const prod = moduloEnviosCreados.productosPreparacion[idx];
         prod.cantidad_escaneada = Math.max(0, (prod.cantidad_escaneada || 0) + delta);
+
+        // Marcar que hay cambios pendientes
+        moduloEnviosCreados.cambiosPendientes = true;
+        moduloEnviosCreados.actualizarBotonGuardar();
 
         moduloEnviosCreados.actualizarUIPreparacion(idx);
     },
@@ -1017,6 +1035,10 @@ export const moduloEnviosCreados = {
 
             if (error) throw error;
 
+            // Marcar que no hay cambios pendientes
+            moduloEnviosCreados.cambiosPendientes = false;
+            moduloEnviosCreados.actualizarBotonGuardar();
+
             mostrarNotificacion('Progreso guardado. Podés continuar después.', 'success');
 
         } catch (error) {
@@ -1044,19 +1066,63 @@ export const moduloEnviosCreados = {
         }
     },
 
-    cancelarPreparacion: async () => {
-        const confirmado = await confirmarAccion(
-            'Cancelar preparación',
-            '¿Seguro que querés cancelar? Se perderá el progreso de escaneo.',
-            'warning',
-            'Sí, Cancelar'
-        );
+    // ============================================
+    // BOTÓN DINÁMICO: Guardar/Salir
+    // ============================================
+    actualizarBotonGuardar: () => {
+        const btn = document.getElementById('btn-guardar-salir');
+        if (!btn) return;
 
-        if (!confirmado) return;
+        if (moduloEnviosCreados.cambiosPendientes) {
+            // Hay cambios sin guardar → mostrar "Guardar"
+            btn.innerHTML = '<i class="fas fa-save mr-1"></i>Guardar y Continuar';
+            btn.className = 'px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors';
+        } else {
+            // Todo guardado → mostrar "Salir"
+            btn.innerHTML = '<i class="fas fa-sign-out-alt mr-1"></i>Salir';
+            btn.className = 'px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors';
+        }
+    },
+
+    accionBotonGuardarSalir: async () => {
+        if (moduloEnviosCreados.cambiosPendientes) {
+            // Hay cambios → guardar
+            await moduloEnviosCreados.guardarProgresoPreparacion();
+        } else {
+            // Ya guardado → salir sin confirmación
+            await moduloEnviosCreados.salirPreparacion();
+        }
+    },
+
+    salirPreparacion: async () => {
+        // Salir sin pedir confirmación (ya guardó)
+        moduloEnviosCreados.preparacionActiva = null;
+        moduloEnviosCreados.productosPreparacion = [];
+        moduloEnviosCreados.ultimoSkuFoco = null;
+        moduloEnviosCreados.cambiosPendientes = false;
+
+        // Volver a la lista
+        const contenedor = document.getElementById('app-content');
+        await moduloEnviosCreados.render(contenedor);
+    },
+
+    cancelarPreparacion: async () => {
+        // Solo pedir confirmación si hay cambios sin guardar
+        if (moduloEnviosCreados.cambiosPendientes) {
+            const confirmado = await confirmarAccion(
+                'Cancelar preparación',
+                '¿Seguro que querés cancelar? Se perderá el progreso de escaneo no guardado.',
+                'warning',
+                'Sí, Cancelar'
+            );
+
+            if (!confirmado) return;
+        }
 
         moduloEnviosCreados.preparacionActiva = null;
         moduloEnviosCreados.productosPreparacion = [];
         moduloEnviosCreados.ultimoSkuFoco = null;
+        moduloEnviosCreados.cambiosPendientes = false;
 
         // Volver a la lista
         const contenedor = document.getElementById('app-content');
