@@ -773,10 +773,12 @@ export const moduloCalculadora = {
             const fechaDesde = new Date();
             fechaDesde.setDate(fechaDesde.getDate() - DIAS_EVALUACION);
 
+            // GAS usa fecha_pago (Logistica_Full.js línea 69)
+            // Usamos COALESCE para fallback a fecha_creacion si fecha_pago es null
             const { data: ordenes, error } = await supabase
                 .from('ordenes_meli')
-                .select('sku, cantidad, fecha_creacion, id_item')
-                .gte('fecha_creacion', fechaDesde.toISOString());
+                .select('sku, cantidad, fecha_pago, fecha_creacion, id_item')
+                .or(`fecha_pago.gte.${fechaDesde.toISOString()},and(fecha_pago.is.null,fecha_creacion.gte.${fechaDesde.toISOString()})`);
 
             if (error) {
                 console.error('Error consultando órdenes:', error);
@@ -795,10 +797,12 @@ export const moduloCalculadora = {
             const ventasPorSkuPorDia = {};
 
             ordenes.forEach(orden => {
-                if (!orden.sku || !orden.fecha_creacion) return;
+                // GAS usa fecha_pago (línea 69), fallback a fecha_creacion
+                const fechaOrden = orden.fecha_pago || orden.fecha_creacion;
+                if (!orden.sku || !fechaOrden) return;
 
                 const sku = orden.sku;
-                const fecha = new Date(orden.fecha_creacion);
+                const fecha = new Date(fechaOrden);
                 const fechaStr = fecha.toISOString().split('T')[0]; // 'YYYY-MM-DD'
                 const cantidad = parseInt(orden.cantidad) || 1;
 
