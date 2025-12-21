@@ -98,7 +98,7 @@ export const moduloDashboard = {
                 </div>
 
                 <!-- KPIs Cards -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="kpis-container">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="kpis-container">
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
                         <div class="flex items-center justify-between">
                             <p class="text-xs font-bold text-gray-400 uppercase">Ventas Netas</p>
@@ -115,6 +115,15 @@ export const moduloDashboard = {
                         </div>
                         <p class="text-2xl font-bold text-gray-800 mt-2" id="kpi-ordenes">-</p>
                         <p class="text-xs text-gray-500 mt-1">ordenes confirmadas</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <p class="text-xs font-bold text-gray-400 uppercase">Costo Meli</p>
+                            <i class="fas fa-hand-holding-usd text-yellow-500"></i>
+                        </div>
+                        <p class="text-2xl font-bold text-gray-800 mt-2" id="kpi-costo-meli">-</p>
+                        <p class="text-xs text-gray-500 mt-1">comisiones + envio (prom)</p>
                     </div>
 
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
@@ -269,7 +278,7 @@ export const moduloDashboard = {
             // Obtener ordenes del periodo
             const { data: ordenes, error: errorOrdenes } = await supabase
                 .from('ordenes_meli')
-                .select('id_orden, neto_recibido, cantidad, fecha_pago, fecha_creacion, id_item, titulo_item, sku')
+                .select('id_orden, neto_recibido, cantidad, fecha_pago, fecha_creacion, id_item, titulo_item, sku, pct_costo_meli')
                 .or(`fecha_pago.gte.${filtros.desde},fecha_creacion.gte.${filtros.desde}`)
                 .or(`fecha_pago.lte.${filtros.hasta},fecha_creacion.lte.${filtros.hasta}`);
 
@@ -314,6 +323,17 @@ export const moduloDashboard = {
             kpis.acos = kpis.ventas_netas > 0
                 ? ((kpis.inversion_publicidad || 0) / kpis.ventas_netas) * 100
                 : 0;
+
+            // Calcular % promedio de costo Meli
+            if (!errorOrdenes && ordenes) {
+                const ordenesConCosto = ordenes.filter(o => o.pct_costo_meli != null);
+                if (ordenesConCosto.length > 0) {
+                    const sumaCostos = ordenesConCosto.reduce((sum, o) => sum + parseFloat(o.pct_costo_meli), 0);
+                    kpis.pct_costo_meli_promedio = sumaCostos / ordenesConCosto.length;
+                } else {
+                    kpis.pct_costo_meli_promedio = 0;
+                }
+            }
 
             // Agrupar ventas por dia para grafico
             if (!errorOrdenes && ordenes) {
@@ -389,6 +409,7 @@ export const moduloDashboard = {
         document.getElementById('kpi-ventas').textContent = formatearMoneda(kpis.ventas_netas || 0);
         document.getElementById('kpi-items').textContent = `${formatearNumero(kpis.items_vendidos || 0)} items vendidos`;
         document.getElementById('kpi-ordenes').textContent = formatearNumero(kpis.cantidad_ordenes || 0);
+        document.getElementById('kpi-costo-meli').textContent = formatearPorcentaje(kpis.pct_costo_meli_promedio || 0);
         document.getElementById('kpi-publicidad').textContent = formatearMoneda(kpis.inversion_publicidad || 0);
         document.getElementById('kpi-acos').textContent = formatearPorcentaje(kpis.acos || 0);
     },

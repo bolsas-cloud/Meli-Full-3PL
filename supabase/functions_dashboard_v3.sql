@@ -25,6 +25,7 @@ RETURNS TABLE (
     items_vendidos INTEGER,
     inversion_publicidad NUMERIC,
     acos NUMERIC,
+    pct_costo_meli_promedio NUMERIC,
     ultima_actualizacion_ordenes TIMESTAMPTZ,
     ultima_actualizacion_publicidad DATE
 )
@@ -36,6 +37,7 @@ DECLARE
     v_items INTEGER := 0;
     v_publicidad NUMERIC := 0;
     v_acos NUMERIC := 0;
+    v_pct_costo_meli NUMERIC := 0;
     v_ultima_orden TIMESTAMPTZ;
     v_ultima_pub DATE;
     v_ultimo_costo_conocido NUMERIC := 0;
@@ -51,6 +53,14 @@ BEGIN
     INTO v_ventas, v_ordenes, v_items, v_ultima_orden
     FROM ordenes_meli o
     WHERE DATE(COALESCE(o.fecha_pago, o.fecha_creacion)) BETWEEN p_fecha_desde AND p_fecha_hasta;
+
+    -- Calcular % promedio de costo Meli (comisiones + envio)
+    -- Solo considera ordenes que tienen el dato calculado
+    SELECT COALESCE(ROUND(AVG(o.pct_costo_meli), 2), 0)
+    INTO v_pct_costo_meli
+    FROM ordenes_meli o
+    WHERE DATE(COALESCE(o.fecha_pago, o.fecha_creacion)) BETWEEN p_fecha_desde AND p_fecha_hasta
+      AND o.pct_costo_meli IS NOT NULL;
 
     -- Obtener publicidad del periodo (con manejo de delay de 2 dias)
     SELECT
@@ -97,6 +107,7 @@ BEGIN
         v_items,
         v_publicidad,
         v_acos,
+        v_pct_costo_meli,
         v_ultima_orden,
         v_ultima_pub;
 END;
