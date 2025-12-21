@@ -733,18 +733,18 @@ export const moduloCalculadora = {
         }
 
         try {
-            // Verificar si hay token de ML almacenado
+            // Verificar si hay token de ML almacenado (en config_meli, donde lo guarda auth.js)
             const { data: tokenData, error: tokenError } = await supabase
-                .from('config_logistica')
+                .from('config_meli')
                 .select('valor')
-                .eq('parametro', 'ml_access_token')
+                .eq('clave', 'access_token')
                 .single();
 
             if (tokenError || !tokenData?.valor) {
                 if (!silencioso) {
                     mostrarNotificacion('No hay sesión de ML activa. Ve a Configuración para conectar.', 'warning');
                 } else {
-                    console.log('Sin sesión ML activa, usando datos existentes en Supabase');
+                    console.log('Sin sesión ML activa, continuando con datos existentes');
                 }
                 // Continúa con datos existentes - no es un error bloqueante
                 return { success: true, source: 'cache' };
