@@ -51,9 +51,11 @@ self.addEventListener('fetch', (event) => {
     // Solo cachear requests GET
     if (event.request.method !== 'GET') return;
 
-    // No cachear requests a APIs externas
+    // No cachear requests a APIs externas o extensiones
     if (event.request.url.includes('supabase.co') ||
-        event.request.url.includes('mercadolibre.com')) {
+        event.request.url.includes('mercadolibre.com') ||
+        event.request.url.startsWith('chrome-extension://') ||
+        event.request.url.startsWith('moz-extension://')) {
         return;
     }
 

@@ -144,19 +144,30 @@
                     }
                 }
 
-                // Obtener nickname del usuario
-                const userResponse = await fetch('https://api.mercadolibre.com/users/me', {
-                    headers: {
-                        'Authorization': `Bearer ${tokenData.access_token}`
+                // Obtener nickname del usuario (puede fallar por CORS, no es crítico)
+                try {
+                    const userResponse = await fetch('https://api.mercadolibre.com/users/me', {
+                        headers: {
+                            'Authorization': `Bearer ${tokenData.access_token}`
+                        }
+                    });
+
+                    const userData = await userResponse.json();
+
+                    if (userData.nickname) {
+                        await supabase
+                            .from('config_meli')
+                            .upsert({ clave: 'user_nickname', valor: userData.nickname }, { onConflict: 'clave' });
                     }
-                });
+                } catch (corsError) {
+                    // CORS puede bloquear esta llamada - no es crítico
+                    // El nickname se obtendrá después desde auth.js
+                    console.warn('No se pudo obtener nickname (CORS):', corsError.message);
 
-                const userData = await userResponse.json();
-
-                if (userData.nickname) {
+                    // Guardar user_id como nickname temporal
                     await supabase
                         .from('config_meli')
-                        .upsert({ clave: 'user_nickname', valor: userData.nickname }, { onConflict: 'clave' });
+                        .upsert({ clave: 'user_nickname', valor: `Usuario ${tokenData.user_id}` }, { onConflict: 'clave' });
                 }
 
                 console.log('Conexión exitosa!');
