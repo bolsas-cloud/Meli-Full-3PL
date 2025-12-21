@@ -29,16 +29,25 @@ export const apiMeli = {
     },
 
     // ============================================
-    // OBTENER: Stock de Full por SKU
+    // OBTENER: Stock de Full por ID de publicación (preferido) o SKU
     // ============================================
-    obtenerStockFull: async (sku) => {
+    obtenerStockFull: async (idPublicacion, sku = null) => {
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('publicaciones_meli')
-                .select('stock_full, stock_reservado, stock_transito, id_inventario')
-                .eq('sku', sku)
-                .single();
+                .select('id_publicacion, sku, stock_full, stock_reservado, stock_transito, id_inventario');
 
+            // Buscar por id_publicacion (MLA...) si está disponible
+            if (idPublicacion) {
+                query = query.eq('id_publicacion', idPublicacion).single();
+            } else if (sku) {
+                // Fallback: buscar por SKU (puede haber múltiples, devuelve el primero)
+                query = query.eq('sku', sku).limit(1).single();
+            } else {
+                return null;
+            }
+
+            const { data, error } = await query;
             if (error) throw error;
             return data;
         } catch (error) {
@@ -203,9 +212,10 @@ export const apiMeli = {
 
             if (errorRegistro) throw errorRegistro;
 
-            // Crear detalles
+            // Crear detalles (incluye id_publicacion como clave única)
             const detalles = productos.map(p => ({
                 id_envio: idEnvio,
+                id_publicacion: p.id_publicacion || null,
                 sku: p.sku,
                 cantidad_enviada: p.cantidad
             }));
@@ -276,6 +286,132 @@ export const apiMeli = {
             console.error('Error sincronizando:', error);
             mostrarNotificacion('Error de sincronización', 'error');
             return false;
+        }
+    },
+
+    // ============================================
+    // OBTENER: IDs de órdenes existentes en Supabase
+    // Se usa para identificar qué órdenes son nuevas al sincronizar
+    // ============================================
+    obtenerIdsOrdenesExistentes: async () => {
+        try {
+            const { data, error } = await supabase
+                .from('ordenes_meli')
+                .select('id_orden');
+
+            if (error) throw error;
+
+            // Retornar Set para búsqueda O(1)
+            const idsSet = new Set();
+            (data || []).forEach(row => idsSet.add(String(row.id_orden)));
+
+            console.log(`Órdenes existentes en DB: ${idsSet.size}`);
+            return idsSet;
+        } catch (error) {
+            console.error('Error obteniendo IDs de órdenes:', error);
+            return new Set();
+        }
+    },
+
+    // ============================================
+    // SINCRONIZAR: Órdenes desde API de ML
+    // Identifica y guarda solo las nuevas
+    // ============================================
+    sincronizarOrdenes: async (diasAtras = 30) => {
+        try {
+            mostrarNotificacion('Sincronizando órdenes...', 'info');
+
+            // 1. Obtener IDs existentes para comparar
+            const ordenesExistentes = await apiMeli.obtenerIdsOrdenesExistentes();
+            console.log(`IDs existentes antes de sync: ${ordenesExistentes.size}`);
+
+            // 2. Verificar autenticación
+            const conectado = await moduloAuth.verificarSesion();
+            if (!conectado) {
+                mostrarNotificacion('Primero debes conectar con ML', 'error');
+                return { nuevas: 0, existentes: ordenesExistentes.size };
+            }
+
+            // 3. Llamar Edge Function para traer órdenes
+            const fechaDesde = new Date();
+            fechaDesde.setDate(fechaDesde.getDate() - diasAtras);
+
+            const { data, error } = await supabase.functions.invoke('sync-meli', {
+                body: {
+                    action: 'sync-orders',
+                    fechaDesde: fechaDesde.toISOString(),
+                    ordenesExistentes: Array.from(ordenesExistentes)
+                }
+            });
+
+            if (error) {
+                console.warn('Edge Function no disponible:', error);
+                mostrarNotificacion('Usa GAS/Migración para traer órdenes nuevas', 'info');
+                return { nuevas: 0, existentes: ordenesExistentes.size };
+            }
+
+            // 4. Reportar resultado
+            const nuevas = data?.nuevas || 0;
+            const total = data?.total || 0;
+
+            if (nuevas > 0) {
+                mostrarNotificacion(`${nuevas} órdenes nuevas sincronizadas`, 'success');
+            } else {
+                mostrarNotificacion('No hay órdenes nuevas', 'info');
+            }
+
+            return { nuevas, existentes: ordenesExistentes.size, total };
+        } catch (error) {
+            console.error('Error sincronizando órdenes:', error);
+            mostrarNotificacion('Error al sincronizar órdenes', 'error');
+            return { nuevas: 0, existentes: 0 };
+        }
+    },
+
+    // ============================================
+    // INSERTAR: Órdenes nuevas (para uso desde migración)
+    // Filtra las que ya existen antes de insertar
+    // ============================================
+    insertarOrdenesNuevas: async (ordenes) => {
+        if (!ordenes || ordenes.length === 0) {
+            return { insertadas: 0, duplicadas: 0 };
+        }
+
+        try {
+            // Obtener IDs existentes
+            const existentes = await apiMeli.obtenerIdsOrdenesExistentes();
+
+            // Filtrar solo las nuevas
+            const nuevas = ordenes.filter(o => !existentes.has(String(o.id_orden)));
+            const duplicadas = ordenes.length - nuevas.length;
+
+            if (nuevas.length === 0) {
+                console.log('No hay órdenes nuevas para insertar');
+                return { insertadas: 0, duplicadas };
+            }
+
+            // Insertar en lotes de 100
+            const BATCH_SIZE = 100;
+            let insertadas = 0;
+
+            for (let i = 0; i < nuevas.length; i += BATCH_SIZE) {
+                const lote = nuevas.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('ordenes_meli')
+                    .insert(lote);
+
+                if (error) {
+                    console.error('Error insertando lote:', error);
+                } else {
+                    insertadas += lote.length;
+                }
+            }
+
+            console.log(`Órdenes insertadas: ${insertadas}, duplicadas omitidas: ${duplicadas}`);
+            return { insertadas, duplicadas };
+        } catch (error) {
+            console.error('Error insertando órdenes:', error);
+            return { insertadas: 0, duplicadas: 0 };
         }
     }
 };

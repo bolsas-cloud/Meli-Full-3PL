@@ -71,11 +71,26 @@ export const moduloCalculadora = {
                         </div>
                     </div>
 
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-calendar-alt text-brand mr-1"></i>
+                            Fecha de Colecta Programada
+                            <i class="fas fa-info-circle text-gray-400 ml-1" title="Fecha en que ML recolectará el envío. El cálculo considera el stock que se venderá hasta esa fecha."></i>
+                        </label>
+                        <input type="date" id="param-fecha-colecta"
+                               class="w-full md:w-64 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent">
+                    </div>
+
                     <div class="mt-4 flex gap-3">
                         <button onclick="moduloCalculadora.calcular()"
                                 class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2">
                             <i class="fas fa-calculator"></i>
                             Calcular Sugerencias
+                        </button>
+                        <button onclick="moduloCalculadora.sincronizarDesdeML()"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2">
+                            <i class="fas fa-sync-alt"></i>
+                            Sincronizar ML
                         </button>
                         <button onclick="moduloCalculadora.guardarConfig()"
                                 class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors">
@@ -135,14 +150,15 @@ export const moduloCalculadora = {
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ventas/Día</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">En Tránsito</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Días Cobertura</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" title="Stock estimado en fecha de colecta">Stock Proy.</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Días Cob.</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cantidad a Enviar</th>
                                     <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Riesgo</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-sugerencias" class="divide-y divide-gray-100 text-sm">
                                 <tr>
-                                    <td colspan="9" class="px-4 py-8 text-center text-gray-400">
+                                    <td colspan="10" class="px-4 py-8 text-center text-gray-400">
                                         <i class="fas fa-calculator fa-2x mb-2"></i>
                                         <p>Haz clic en "Calcular Sugerencias" para ver los resultados</p>
                                     </td>
@@ -228,13 +244,13 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // CALCULAR: Sugerencias de envío
+    // CALCULAR: Sugerencias de envío (preferencia: RPC en DB)
     // ============================================
     calcular: async () => {
         const tbody = document.getElementById('tabla-sugerencias');
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-circle-notch fa-spin fa-2x mb-2"></i>
                     <p>Calculando sugerencias...</p>
                 </td>
@@ -243,41 +259,90 @@ export const moduloCalculadora = {
 
         try {
             // Leer parámetros
-            const Tt = parseFloat(document.getElementById('param-transito').value) || 3;
-            const Fe = parseFloat(document.getElementById('param-frecuencia').value) || 7;
+            const Tt = parseInt(document.getElementById('param-transito').value) || 3;
+            const Fe = parseInt(document.getElementById('param-frecuencia').value) || 7;
             const Z = parseFloat(document.getElementById('param-servicio').value) || 1.65;
             const incremento = parseFloat(document.getElementById('param-evento').value) || 0;
 
-            // Intentar obtener productos REALES de Supabase
-            const { data: productosReales, error } = await supabase
-                .from('publicaciones_meli')
-                .select('sku, titulo, ventas_90d, stock_full, stock_transito, ventas_dia, desviacion, id_inventario')
-                .eq('tipo_logistica', 'fulfillment')
-                .order('ventas_90d', { ascending: false });
+            // Leer fecha de colecta
+            const fechaColectaStr = document.getElementById('param-fecha-colecta').value;
 
-            if (error) throw error;
+            // Validar fecha de colecta
+            if (!fechaColectaStr) {
+                mostrarNotificacion('Selecciona una fecha de colecta para calcular', 'warning');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="px-4 py-8 text-center text-yellow-600">
+                            <i class="fas fa-calendar-alt fa-2x mb-2"></i>
+                            <p>Selecciona una fecha de colecta programada</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
 
-            if (productosReales && productosReales.length > 0) {
-                // Calcular sugerencias con datos reales
-                sugerencias = moduloCalculadora.calcularSugerencias(productosReales, Tt, Fe, Z, incremento);
+            // ========== PREFERENCIA: Usar RPC de PostgreSQL ==========
+            // Los cálculos se hacen en la base de datos (más eficiente)
+            const { data: datosRPC, error: errorRPC } = await supabase.rpc('calcular_sugerencias_envio', {
+                p_fecha_colecta: fechaColectaStr,
+                p_tiempo_transito: Tt,
+                p_frecuencia_envio: Fe,
+                p_nivel_servicio_z: Z,
+                p_incremento_evento: incremento
+            });
+
+            if (!errorRPC && datosRPC && datosRPC.length > 0) {
+                // Usar datos del RPC (cálculos hechos en PostgreSQL)
+                sugerencias = datosRPC.map(r => ({
+                    id_publicacion: r.id_publicacion,
+                    sku: r.sku,
+                    titulo: r.titulo,
+                    ventas_dia: parseFloat(r.ventas_dia) || 0,
+                    stock_actual_full: r.stock_full || 0,
+                    stock_en_transito: r.stock_transito || 0,
+                    stock_proyectado: parseFloat(r.stock_proyectado) || 0,
+                    stock_seguridad: r.stock_seguridad || 0,
+                    dias_cobertura: parseFloat(r.dias_cobertura) || 0,
+                    cantidad_a_enviar: r.cantidad_a_enviar || 0,
+                    nivel_riesgo: r.nivel_riesgo || 'OK',
+                    id_inventario: r.id_inventario
+                }));
+                console.log('✓ Cálculos ejecutados en PostgreSQL (RPC)');
                 mostrarNotificacion(`${sugerencias.length} productos analizados`, 'success');
             } else {
-                // Datos de demo si no hay datos reales
-                sugerencias = moduloCalculadora.generarDatosDemo(Tt, Fe, Z, incremento);
-                mostrarNotificacion('Usando datos de demostración. Importa datos reales desde Migración.', 'info');
+                // ========== FALLBACK: Calcular en JavaScript ==========
+                console.warn('RPC no disponible, calculando en JS:', errorRPC?.message);
+
+                const fechaColecta = new Date(fechaColectaStr + 'T00:00:00');
+
+                const { data: productosReales, error } = await supabase
+                    .from('publicaciones_meli')
+                    .select('id_publicacion, sku, titulo, ventas_90d, stock_full, stock_transito, ventas_dia, desviacion, id_inventario')
+                    .eq('tipo_logistica', 'fulfillment')
+                    .order('ventas_90d', { ascending: false });
+
+                if (error) throw error;
+
+                if (productosReales && productosReales.length > 0) {
+                    sugerencias = moduloCalculadora.calcularSugerenciasJS(productosReales, Tt, Fe, Z, incremento, fechaColecta);
+                    mostrarNotificacion(`${sugerencias.length} productos (cálculo local)`, 'info');
+                } else {
+                    sugerencias = moduloCalculadora.generarDatosDemo(Tt, Fe, Z, incremento, fechaColecta);
+                    mostrarNotificacion('Usando datos de demostración. Importa datos reales.', 'info');
+                }
             }
 
             // Pintar tabla
             moduloCalculadora.pintarTabla();
 
             // Actualizar estadísticas
-            moduloCalculadora.actualizarStats();
+            await moduloCalculadora.actualizarStats();
 
         } catch (error) {
             console.error('Error calculando:', error);
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="px-4 py-8 text-center text-red-500">
+                    <td colspan="10" class="px-4 py-8 text-center text-red-500">
                         <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
                         <p>Error al calcular: ${error.message}</p>
                     </td>
@@ -287,55 +352,79 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // CALCULAR: Sugerencias con datos reales
+    // CALCULAR JS: Fallback si RPC no está disponible
+    // Fórmula basada en fecha de colecta (igual que GAS):
+    // - diasHastaColecta = días desde hoy hasta fecha colecta
+    // - consumoProyectado = V × diasHastaColecta
+    // - stockProyectadoEnColecta = (stockFull + enTransito) - consumoProyectado
+    // - cantidadAEnviar = (V × L) + Ss - stockProyectadoEnColecta
     // ============================================
-    calcularSugerencias: (productos, Tt, Fe, Z, incremento) => {
+    calcularSugerenciasJS: (productos, Tt, Fe, Z, incremento, fechaColecta) => {
         const DIAS_PERIODO = 90; // Período para calcular ventas diarias
+
+        // Calcular días hasta la colecta
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const diasHastaColecta = Math.max(0, Math.ceil((fechaColecta - hoy) / (1000 * 60 * 60 * 24)));
+
+        console.log(`Días hasta colecta: ${diasHastaColecta}`);
 
         return productos.map(p => {
             // Calcular ventas diarias desde ventas_90d si no está calculado
-            const ventasDia = p.ventas_dia || (p.ventas_90d ? p.ventas_90d / DIAS_PERIODO : 0);
+            const V = p.ventas_dia || (p.ventas_90d ? p.ventas_90d / DIAS_PERIODO : 0);
             const stockFull = p.stock_full || 0;
             const stockTransito = p.stock_transito || 0;
-            const sigma = p.desviacion || (ventasDia * 0.3); // Usar 30% como estimación si no hay datos
+            const sigma = p.desviacion || (V * 0.3); // Usar 30% como estimación si no hay datos
 
             // Lead Time total = Tiempo Tránsito + Frecuencia de Envío
-            const leadTime = Tt + Fe;
+            const L = Tt + Fe;
 
             // Stock de Seguridad: Ss = Z × σ × √L
-            let stockSeguridad = Z * sigma * Math.sqrt(leadTime);
+            let Ss = Z * sigma * Math.sqrt(L);
 
             // Aplicar incremento por evento
+            const factorEvento = 1 + (incremento / 100);
             if (incremento > 0) {
-                stockSeguridad = stockSeguridad * (1 + incremento / 100);
+                Ss = Ss * factorEvento;
             }
 
-            // Demanda esperada en el período
-            const demandaPeriodo = ventasDia * leadTime * (1 + incremento / 100);
+            // ========== CÁLCULO BASADO EN FECHA DE COLECTA ==========
+            // Consumo proyectado hasta la fecha de colecta
+            const consumoProyectado = V * diasHastaColecta * factorEvento;
 
-            // Cantidad a enviar: Q* = Demanda + Ss - Stock Actual - En Tránsito
-            const cantidadIdeal = Math.ceil(demandaPeriodo + stockSeguridad - stockFull - stockTransito);
+            // Stock proyectado en el momento de la colecta
+            // (lo que tendremos en Full cuando venga el camión a recoger)
+            const stockProyectadoEnColecta = (stockFull + stockTransito) - consumoProyectado;
 
-            // Días de cobertura
-            const diasCobertura = ventasDia > 0 ? stockFull / ventasDia : 999;
+            // Demanda esperada durante el período de reposición (después de colecta)
+            const demandaPeriodo = V * L * factorEvento;
 
-            // Nivel de riesgo
+            // Cantidad a enviar: lo que necesitamos - lo que tendremos
+            // Q* = (V × L) + Ss - stockProyectadoEnColecta
+            const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
+
+            // Días de cobertura actual (sin considerar tránsito)
+            const diasCobertura = V > 0 ? stockFull / V : 999;
+
+            // Nivel de riesgo basado en stock proyectado
             let nivelRiesgo = 'OK';
-            if (diasCobertura < 3) {
+            if (stockProyectadoEnColecta < 0 || diasCobertura < 3) {
                 nivelRiesgo = 'CRÍTICO';
-            } else if (diasCobertura < 7) {
+            } else if (stockProyectadoEnColecta < Ss || diasCobertura < 7) {
                 nivelRiesgo = 'BAJO';
             } else if (diasCobertura < 14) {
                 nivelRiesgo = 'NORMAL';
             }
 
             return {
-                sku: p.sku,
+                id_publicacion: p.id_publicacion,  // Clave única (MLA...)
+                sku: p.sku,                        // Puede repetirse
                 titulo: p.titulo,
-                ventas_dia: ventasDia,
+                ventas_dia: V,
                 stock_actual_full: stockFull,
                 stock_en_transito: stockTransito,
-                stock_seguridad: Math.ceil(stockSeguridad),
+                stock_proyectado: Math.round(stockProyectadoEnColecta * 10) / 10,
+                stock_seguridad: Math.ceil(Ss),
                 dias_cobertura: diasCobertura,
                 cantidad_a_enviar: Math.max(0, cantidadIdeal),
                 nivel_riesgo: nivelRiesgo,
@@ -360,7 +449,7 @@ export const moduloCalculadora = {
         if (sugerencias.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="10" class="px-4 py-8 text-center text-gray-400">
                         <p>No hay sugerencias disponibles</p>
                     </td>
                 </tr>
@@ -368,20 +457,26 @@ export const moduloCalculadora = {
             return;
         }
 
-        tbody.innerHTML = sugerencias.map(s => `
-            <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(s.sku) ? 'bg-brand-light' : ''}">
+        // Usar id_publicacion como clave única (fallback a sku para datos demo)
+        tbody.innerHTML = sugerencias.map(s => {
+            const key = s.id_publicacion || s.sku;
+            const stockProy = s.stock_proyectado ?? 0;
+            const stockProyClass = stockProy < 0 ? 'text-red-600 font-bold' : (stockProy < (s.stock_seguridad || 0) ? 'text-yellow-600' : 'text-gray-600');
+            return `
+            <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(key) ? 'bg-brand-light' : ''}">
                 <td class="px-4 py-3">
                     <input type="checkbox"
-                           ${productosSeleccionados.has(s.sku) ? 'checked' : ''}
-                           onchange="moduloCalculadora.toggleSeleccion('${s.sku}')">
+                           ${productosSeleccionados.has(key) ? 'checked' : ''}
+                           onchange="moduloCalculadora.toggleSeleccion('${key}')">
                 </td>
-                <td class="px-4 py-3 font-mono text-xs text-gray-600">${s.sku}</td>
+                <td class="px-4 py-3 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
                 <td class="px-4 py-3">
                     <div class="max-w-xs truncate" title="${s.titulo}">${s.titulo || '-'}</div>
                 </td>
                 <td class="px-4 py-3 text-right font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
                 <td class="px-4 py-3 text-right">${s.stock_actual_full || 0}</td>
                 <td class="px-4 py-3 text-right text-gray-500">${s.stock_en_transito || 0}</td>
+                <td class="px-4 py-3 text-right ${stockProyClass}" title="Stock estimado en fecha de colecta">${stockProy}</td>
                 <td class="px-4 py-3 text-right">
                     <span class="${(s.dias_cobertura || 0) < 3 ? 'text-red-600 font-bold' : ''}">${(s.dias_cobertura || 0).toFixed(1)}</span>
                 </td>
@@ -390,7 +485,7 @@ export const moduloCalculadora = {
                            value="${s.cantidad_a_enviar || 0}"
                            min="0"
                            class="w-20 text-right border border-gray-300 rounded px-2 py-1"
-                           onchange="moduloCalculadora.actualizarCantidad('${s.sku}', this.value)">
+                           onchange="moduloCalculadora.actualizarCantidad('${key}', this.value)">
                 </td>
                 <td class="px-4 py-3 text-center">
                     <span class="px-2 py-1 rounded-full text-xs font-bold ${colorRiesgo(s.nivel_riesgo)}">
@@ -398,22 +493,40 @@ export const moduloCalculadora = {
                     </span>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
     },
 
     // ============================================
-    // ACTUALIZAR: Estadísticas del panel
+    // ACTUALIZAR: Estadísticas del panel (preferencia: RPC)
     // ============================================
-    actualizarStats: () => {
-        const total = sugerencias.length;
-        const criticos = sugerencias.filter(s => s.nivel_riesgo === 'CRÍTICO').length;
-        const bajos = sugerencias.filter(s => s.nivel_riesgo === 'BAJO').length;
-        const ok = sugerencias.filter(s => s.nivel_riesgo === 'OK').length;
+    actualizarStats: async () => {
+        // Si ya tenemos sugerencias calculadas, usarlas
+        if (sugerencias.length > 0) {
+            const total = sugerencias.length;
+            const criticos = sugerencias.filter(s => s.nivel_riesgo === 'CRÍTICO').length;
+            const bajos = sugerencias.filter(s => s.nivel_riesgo === 'BAJO').length;
+            const ok = sugerencias.filter(s => s.nivel_riesgo === 'OK').length;
 
-        document.getElementById('stat-total').textContent = total;
-        document.getElementById('stat-criticos').textContent = criticos;
-        document.getElementById('stat-bajos').textContent = bajos;
-        document.getElementById('stat-ok').textContent = ok;
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-criticos').textContent = criticos;
+            document.getElementById('stat-bajos').textContent = bajos;
+            document.getElementById('stat-ok').textContent = ok;
+            return;
+        }
+
+        // Si no hay sugerencias, intentar obtener stats de RPC
+        try {
+            const { data, error } = await supabase.rpc('obtener_estadisticas_stock');
+            if (!error && data && data.length > 0) {
+                const stats = data[0];
+                document.getElementById('stat-total').textContent = stats.total_skus || 0;
+                document.getElementById('stat-criticos').textContent = stats.criticos || 0;
+                document.getElementById('stat-bajos').textContent = stats.stock_bajo || 0;
+                document.getElementById('stat-ok').textContent = stats.ok || 0;
+            }
+        } catch (err) {
+            console.warn('RPC stats no disponible:', err);
+        }
     },
 
     // ============================================
@@ -434,7 +547,10 @@ export const moduloCalculadora = {
     // ============================================
     toggleAll: (checkbox) => {
         if (checkbox.checked) {
-            sugerencias.forEach(s => productosSeleccionados.add(s.sku));
+            sugerencias.forEach(s => {
+                const key = s.id_publicacion || s.sku;
+                productosSeleccionados.add(key);
+            });
         } else {
             productosSeleccionados.clear();
         }
@@ -449,17 +565,20 @@ export const moduloCalculadora = {
         productosSeleccionados.clear();
         sugerencias
             .filter(s => s.nivel_riesgo === 'CRÍTICO')
-            .forEach(s => productosSeleccionados.add(s.sku));
+            .forEach(s => {
+                const key = s.id_publicacion || s.sku;
+                productosSeleccionados.add(key);
+            });
         moduloCalculadora.pintarTabla();
         moduloCalculadora.actualizarBotonRegistrar();
         mostrarNotificacion(`${productosSeleccionados.size} productos críticos seleccionados`, 'info');
     },
 
     // ============================================
-    // ACTUALIZAR: Cantidad a enviar
+    // ACTUALIZAR: Cantidad a enviar (busca por id_publicacion o sku)
     // ============================================
-    actualizarCantidad: (sku, cantidad) => {
-        const idx = sugerencias.findIndex(s => s.sku === sku);
+    actualizarCantidad: (key, cantidad) => {
+        const idx = sugerencias.findIndex(s => (s.id_publicacion || s.sku) === key);
         if (idx >= 0) {
             sugerencias[idx].cantidad_a_enviar = parseInt(cantidad) || 0;
         }
@@ -496,11 +615,15 @@ export const moduloCalculadora = {
 
             if (errorEnvio) throw errorEnvio;
 
-            // Crear detalles del envío
+            // Crear detalles del envío (usando id_publicacion como clave)
             const detalles = sugerencias
-                .filter(s => productosSeleccionados.has(s.sku))
+                .filter(s => {
+                    const key = s.id_publicacion || s.sku;
+                    return productosSeleccionados.has(key);
+                })
                 .map(s => ({
                     id_envio: idEnvio,
+                    id_publicacion: s.id_publicacion || null,
                     sku: s.sku,
                     cantidad_enviada: s.cantidad_a_enviar || 0
                 }));
@@ -527,7 +650,7 @@ export const moduloCalculadora = {
     // ============================================
     // DEMO: Generar datos de ejemplo
     // ============================================
-    generarDatosDemo: (Tt, Fe, Z, incremento) => {
+    generarDatosDemo: (Tt, Fe, Z, incremento, fechaColecta) => {
         // Datos de ejemplo para desarrollo
         const productos = [
             { sku: 'LAC101500XACRC050', titulo: 'Bolsa Lienzo 10x15 x50 Un', ventas_dia: 2.5, stock_actual_full: 12 },
@@ -537,30 +660,99 @@ export const moduloCalculadora = {
             { sku: 'LAC303500XACRC005', titulo: 'Bolsa Lienzo 30x35 x5 Un', ventas_dia: 4.5, stock_actual_full: 3 }
         ];
 
+        // Calcular días hasta la colecta
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const diasHastaColecta = fechaColecta ? Math.max(0, Math.ceil((fechaColecta - hoy) / (1000 * 60 * 60 * 24))) : 0;
+        const factorEvento = 1 + (incremento / 100);
+        const L = Tt + Fe;
+
         return productos.map(p => {
-            // Fórmula: Q* = [V × (Tt + Fe) + Z × σ × √(Tt + Fe)] - Sml
-            const sigma = p.ventas_dia * 0.3; // Desviación estimada
-            const demandaPeriodo = p.ventas_dia * (Tt + Fe) * (1 + incremento/100);
-            const stockSeguridad = Z * sigma * Math.sqrt(Tt + Fe);
-            const cantidadIdeal = Math.ceil(demandaPeriodo + stockSeguridad - p.stock_actual_full);
-            const diasCobertura = p.stock_actual_full / p.ventas_dia;
+            const V = p.ventas_dia;
+            const sigma = V * 0.3;
+            const Ss = Z * sigma * Math.sqrt(L) * factorEvento;
+
+            // Consumo proyectado hasta la colecta
+            const consumoProyectado = V * diasHastaColecta * factorEvento;
+            const stockProyectadoEnColecta = p.stock_actual_full - consumoProyectado;
+
+            // Demanda durante período de reposición
+            const demandaPeriodo = V * L * factorEvento;
+            const cantidadIdeal = Math.ceil(demandaPeriodo + Ss - stockProyectadoEnColecta);
+            const diasCobertura = p.stock_actual_full / V;
 
             let nivelRiesgo = 'OK';
-            if (diasCobertura < 3) nivelRiesgo = 'CRÍTICO';
-            else if (diasCobertura < 7) nivelRiesgo = 'BAJO';
+            if (stockProyectadoEnColecta < 0 || diasCobertura < 3) nivelRiesgo = 'CRÍTICO';
+            else if (stockProyectadoEnColecta < Ss || diasCobertura < 7) nivelRiesgo = 'BAJO';
+            else if (diasCobertura < 14) nivelRiesgo = 'NORMAL';
 
             return {
                 sku: p.sku,
                 titulo: p.titulo,
-                ventas_dia: p.ventas_dia,
+                ventas_dia: V,
                 stock_actual_full: p.stock_actual_full,
                 stock_en_transito: 0,
-                stock_seguridad: Math.ceil(stockSeguridad),
+                stock_proyectado: Math.round(stockProyectadoEnColecta * 10) / 10,
+                stock_seguridad: Math.ceil(Ss),
                 dias_cobertura: diasCobertura,
                 cantidad_a_enviar: Math.max(0, cantidadIdeal),
                 nivel_riesgo: nivelRiesgo
             };
+        }).sort((a, b) => {
+            const ordenRiesgo = { 'CRÍTICO': 0, 'BAJO': 1, 'NORMAL': 2, 'OK': 3 };
+            if (ordenRiesgo[a.nivel_riesgo] !== ordenRiesgo[b.nivel_riesgo]) {
+                return ordenRiesgo[a.nivel_riesgo] - ordenRiesgo[b.nivel_riesgo];
+            }
+            return b.cantidad_a_enviar - a.cantidad_a_enviar;
         });
+    },
+
+    // ============================================
+    // SINCRONIZAR: Traer datos desde API de ML
+    // ============================================
+    sincronizarDesdeML: async () => {
+        mostrarNotificacion('Sincronizando con Mercado Libre...', 'info');
+
+        try {
+            // Verificar si hay token de ML almacenado
+            const { data: tokenData, error: tokenError } = await supabase
+                .from('config_logistica')
+                .select('valor')
+                .eq('parametro', 'ml_access_token')
+                .single();
+
+            if (tokenError || !tokenData?.valor) {
+                mostrarNotificacion('No hay sesión de ML activa. Ve a Configuración para conectar.', 'warning');
+                return false;
+            }
+
+            // Llamar Edge Function de Supabase para sincronizar
+            const { data, error } = await supabase.functions.invoke('sync-meli', {
+                body: { action: 'sync-inventory' }
+            });
+
+            if (error) {
+                // Si no hay Edge Function, usar datos de Supabase existentes
+                console.warn('Edge Function no disponible:', error);
+                mostrarNotificacion('Usando datos de la última migración. Actualiza desde Migración.', 'info');
+
+                // Recalcular con datos existentes
+                await moduloCalculadora.calcular();
+                return true;
+            }
+
+            if (data?.success) {
+                mostrarNotificacion(`Sincronizado: ${data.updated || 0} productos actualizados`, 'success');
+                await moduloCalculadora.calcular();
+                return true;
+            }
+
+            return false;
+        } catch (error) {
+            console.error('Error sincronizando:', error);
+            mostrarNotificacion('Error de sincronización. Verifica la conexión.', 'error');
+            return false;
+        }
     }
 };
 

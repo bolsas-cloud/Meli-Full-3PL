@@ -156,7 +156,7 @@ LAC101500XACRC050	Bolsa Lienzo...	0	77	..."></textarea>
         const MAPEO_COLUMNAS = {
             publicaciones: {
                 tabla: 'publicaciones_meli',
-                clavePrimaria: 'sku',
+                clavePrimaria: 'id_publicacion',  // MLA... es único, SKU puede repetirse
                 columnas: {
                     'SKU': 'sku',
                     'Título': 'titulo',
@@ -205,8 +205,9 @@ LAC101500XACRC050	Bolsa Lienzo...	0	77	..."></textarea>
             },
             sugerencias: {
                 tabla: 'sugerencias_envio_full',
-                clavePrimaria: 'sku',
+                clavePrimaria: 'id_publicacion',  // MLA... es único
                 columnas: {
+                    'ID Publicación': 'id_publicacion',
                     'SKU': 'sku',
                     'Título': 'titulo',
                     'Ventas/Día (V)': 'ventas_dia',

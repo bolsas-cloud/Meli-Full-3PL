@@ -212,20 +212,22 @@ function exportarPublicaciones() {
     'Largo_cm': { nombre: 'largo_cm', tipo: 'numero' }
   };
 
-  const resultado = procesarYExportar(data, headers, mapeo, 'publicaciones_meli', 'sku');
+  // IMPORTANTE: id_publicacion es la clave primaria (MLA...), NO el SKU
+  // El SKU puede repetirse en varias publicaciones
+  const resultado = procesarYExportar(data, headers, mapeo, 'publicaciones_meli', 'id_publicacion');
 
   ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
   SpreadsheetApp.getUi().alert(
     '✅ Exportación completada\n\n' +
     `Archivo: ${resultado.archivo}\n` +
     `Filas procesadas: ${resultado.filas}\n` +
-    `Filas omitidas (sin SKU): ${resultado.omitidas}\n\n` +
+    `Filas omitidas (sin ID Publicación): ${resultado.omitidas}\n\n` +
     'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
   );
 }
 
 /**
- * Exporta las Órdenes normalizadas
+ * Exporta las Órdenes normalizadas (con deduplicación por id_orden + id_item)
  */
 function exportarOrdenes() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -258,13 +260,15 @@ function exportarOrdenes() {
     'Comprador Nickname': { nombre: 'comprador_nickname', tipo: 'texto' }
   };
 
-  const resultado = procesarYExportar(data, headers, mapeo, 'ordenes_meli', 'id_orden');
+  // Usar función especial con deduplicación por clave compuesta
+  const resultado = procesarYExportarConDedup(data, headers, mapeo, 'ordenes_meli', ['id_orden', 'id_item']);
 
   ss.toast(`Exportado: ${resultado.filas} filas`, 'Completado', 5);
   SpreadsheetApp.getUi().alert(
     '✅ Exportación completada\n\n' +
     `Archivo: ${resultado.archivo}\n` +
-    `Filas procesadas: ${resultado.filas}\n\n` +
+    `Filas procesadas: ${resultado.filas}\n` +
+    `Duplicados eliminados: ${resultado.duplicados}\n\n` +
     'El archivo está en tu Google Drive en la carpeta "Exportaciones_Supabase"'
   );
 }
@@ -465,6 +469,105 @@ function procesarYExportar(data, headers, mapeo, nombreTabla, clavePrimaria) {
     archivo: nombreArchivo,
     filas: filasCSV.length,
     omitidas: omitidas,
+    url: archivo.getUrl()
+  };
+}
+
+/**
+ * Procesa los datos con deduplicación por clave compuesta y genera el archivo CSV
+ * @param {Array} clavesCompuestas - Array de nombres de columnas que forman la clave única
+ */
+function procesarYExportarConDedup(data, headers, mapeo, nombreTabla, clavesCompuestas) {
+  // Encontrar índices de columnas
+  const indices = {};
+  Object.keys(mapeo).forEach(headerOriginal => {
+    const idx = headers.indexOf(headerOriginal);
+    if (idx >= 0) {
+      indices[headerOriginal] = idx;
+    }
+  });
+
+  // Generar headers del CSV (columnas de Supabase)
+  const headersCSV = Object.keys(mapeo)
+    .filter(h => indices[h] !== undefined)
+    .map(h => mapeo[h].nombre);
+
+  // Set para trackear claves ya vistas
+  const clavesVistas = new Set();
+  let duplicados = 0;
+
+  // Procesar filas
+  const filasCSV = [];
+  let omitidas = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const fila = data[i];
+    const registro = {};
+    let tieneTodasLasClaves = true;
+
+    Object.keys(mapeo).forEach(headerOriginal => {
+      const idx = indices[headerOriginal];
+      if (idx === undefined) return;
+
+      const config = mapeo[headerOriginal];
+      const valorOriginal = fila[idx];
+      let valorNormalizado;
+
+      switch (config.tipo) {
+        case 'fecha':
+          valorNormalizado = normalizarFecha(valorOriginal);
+          break;
+        case 'numero':
+          valorNormalizado = normalizarNumero(valorOriginal);
+          break;
+        case 'entero':
+          valorNormalizado = normalizarEntero(valorOriginal);
+          break;
+        case 'booleano':
+          valorNormalizado = normalizarBooleano(valorOriginal);
+          break;
+        default:
+          valorNormalizado = normalizarTexto(valorOriginal);
+      }
+
+      registro[config.nombre] = valorNormalizado;
+
+      // Verificar si tiene todas las claves de la clave compuesta
+      if (clavesCompuestas.includes(config.nombre) && !valorNormalizado) {
+        tieneTodasLasClaves = false;
+      }
+    });
+
+    // Solo incluir filas con todas las claves válidas
+    if (tieneTodasLasClaves) {
+      // Generar clave compuesta para detectar duplicados
+      const claveCompuesta = clavesCompuestas.map(k => registro[k] || '').join('|');
+
+      if (clavesVistas.has(claveCompuesta)) {
+        // Duplicado encontrado, saltear
+        duplicados++;
+      } else {
+        clavesVistas.add(claveCompuesta);
+        const filaCSV = headersCSV.map(h => escaparCSV(registro[h]));
+        filasCSV.push(filaCSV.join(','));
+      }
+    } else {
+      omitidas++;
+    }
+  }
+
+  // Crear contenido CSV
+  const contenidoCSV = headersCSV.join(',') + '\n' + filasCSV.join('\n');
+
+  // Guardar archivo
+  const nombreArchivo = `${nombreTabla}_${Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyyMMdd_HHmmss')}.csv`;
+  const archivo = guardarCSV(nombreArchivo, contenidoCSV);
+
+  return {
+    archivo: nombreArchivo,
+    filas: filasCSV.length,
+    omitidas: omitidas,
+    duplicados: duplicados,
     url: archivo.getUrl()
   };
 }
