@@ -773,6 +773,25 @@ export const moduloCalculadora = {
             const fechaDesde = new Date();
             fechaDesde.setDate(fechaDesde.getDate() - DIAS_EVALUACION);
 
+            // ========== PASO 0: Crear mapa ItemID → SKU (igual que GAS líneas 59-62) ==========
+            // GAS: itemInfoMap[row[6]] = { sku: row[0], titulo: row[1] }
+            const { data: publicaciones, error: errorPubs } = await supabase
+                .from('publicaciones_meli')
+                .select('sku, id_publicacion');
+
+            if (errorPubs) {
+                console.error('Error consultando publicaciones:', errorPubs);
+                return {};
+            }
+
+            const itemSkuMap = {};
+            publicaciones.forEach(pub => {
+                if (pub.id_publicacion && pub.sku) {
+                    itemSkuMap[pub.id_publicacion] = pub.sku;
+                }
+            });
+            console.log(`[GAS-REPLICA] Mapa ItemID→SKU creado con ${Object.keys(itemSkuMap).length} productos`);
+
             // GAS usa fecha_pago (Logistica_Full.js línea 69)
             // Usamos COALESCE para fallback a fecha_creacion si fecha_pago es null
             const { data: ordenes, error } = await supabase
@@ -804,12 +823,27 @@ export const moduloCalculadora = {
                 return `${year}-${month}-${day}`;
             };
 
+            let ordenesConSku = 0;
+            let ordenesSinSku = 0;
+
             ordenes.forEach(orden => {
                 // GAS usa fecha_pago (línea 69), fallback a fecha_creacion
                 const fechaOrden = orden.fecha_pago || orden.fecha_creacion;
-                if (!orden.sku || !fechaOrden) return;
+                if (!fechaOrden) return;
 
-                const sku = orden.sku;
+                // IGUAL QUE GAS: Buscar SKU usando id_item en el mapa (líneas 74-76)
+                // Primero intentar con el SKU directo, si no, buscar por id_item
+                let sku = orden.sku;
+                if (!sku && orden.id_item) {
+                    sku = itemSkuMap[orden.id_item];
+                }
+
+                if (!sku) {
+                    ordenesSinSku++;
+                    return;
+                }
+                ordenesConSku++;
+
                 const fecha = new Date(fechaOrden);
                 // Usar timezone LOCAL como GAS (no UTC)
                 const fechaStr = formatearFechaLocal(fecha);
@@ -821,6 +855,8 @@ export const moduloCalculadora = {
                 ventasPorSkuPorDia[sku].ventas[fechaStr] =
                     (ventasPorSkuPorDia[sku].ventas[fechaStr] || 0) + cantidad;
             });
+
+            console.log(`[GAS-REPLICA] Órdenes con SKU: ${ordenesConSku}, sin SKU: ${ordenesSinSku}`);
 
             // ========== PASO 2: Calcular V y σ para cada SKU (igual que GAS líneas 86-106) ==========
             const resultados = {};
