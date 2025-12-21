@@ -26,7 +26,7 @@ SELECT
     p.sku,
     p.titulo,
     p.id_publicacion,
-    p.inventory_id AS id_inventario,
+    p.id_inventario,
     p.precio,
     p.tipo_logistica,
     p.stock_full,
