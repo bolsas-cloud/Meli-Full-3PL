@@ -97,6 +97,12 @@ export const moduloCalculadora = {
                             <i class="fas fa-save"></i>
                             Guardar Config
                         </button>
+                        <button onclick="moduloCalculadora.diagnosticar()"
+                                class="bg-yellow-100 text-yellow-700 px-4 py-2 rounded-lg font-medium hover:bg-yellow-200 transition-colors flex items-center gap-2 h-[42px]"
+                                title="Verificar estado de los datos">
+                            <i class="fas fa-stethoscope"></i>
+                            Diagnóstico
+                        </button>
                     </div>
                 </div>
 
@@ -293,16 +299,30 @@ export const moduloCalculadora = {
         // Intentar actualizar ventas desde órdenes (RPC en DB)
         try {
             const { data: ventasUpdated, error: ventasError } = await supabase.rpc('actualizar_ventas_diarias_publicaciones', {
-                p_dias_evaluacion: 30
+                p_dias_evaluacion: 90
             });
             if (!ventasError && ventasUpdated > 0) {
                 console.log(`✓ Ventas diarias actualizadas para ${ventasUpdated} productos`);
+            } else {
+                // Fallback: calcular localmente en JS
+                await moduloCalculadora.calcularVentasDiariasJS();
             }
         } catch (err) {
             console.warn('RPC actualizar_ventas_diarias_publicaciones no disponible:', err);
             // Fallback: calcular localmente en JS
             await moduloCalculadora.calcularVentasDiariasJS();
         }
+
+        // ========== PASO 1.6: Actualizar stock en tránsito desde envíos activos ==========
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                    <i class="fas fa-truck fa-spin fa-2x mb-2"></i>
+                    <p>Calculando stock en tránsito...</p>
+                </td>
+            </tr>
+        `;
+        await moduloCalculadora.calcularStockTransitoJS();
 
         // ========== PASO 2: Calcular sugerencias ==========
         tbody.innerHTML = `
@@ -749,43 +769,72 @@ export const moduloCalculadora = {
 
     // ============================================
     // CALCULAR VENTAS DIARIAS: Fallback en JavaScript
-    // Agrupa órdenes de los últimos 30 días y calcula promedio por SKU
+    // Agrupa órdenes de los últimos 90 días y calcula promedio por SKU
     // ============================================
     calcularVentasDiariasJS: async () => {
-        const DIAS_EVALUACION = 30;
+        const DIAS_EVALUACION = 90;
 
         try {
-            // Obtener órdenes de los últimos 30 días
+            // Obtener órdenes de los últimos 90 días
             const fechaDesde = new Date();
             fechaDesde.setDate(fechaDesde.getDate() - DIAS_EVALUACION);
 
+            // NOTA: La columna es fecha_creacion, NO fecha_orden
             const { data: ordenes, error } = await supabase
                 .from('ordenes_meli')
-                .select('sku, cantidad, fecha_orden')
-                .gte('fecha_orden', fechaDesde.toISOString())
-                .not('sku', 'is', null);
+                .select('sku, cantidad, fecha_creacion, id_item')
+                .gte('fecha_creacion', fechaDesde.toISOString());
 
-            if (error || !ordenes || ordenes.length === 0) {
-                console.log('No hay órdenes para calcular ventas diarias');
+            if (error) {
+                console.error('Error consultando órdenes:', error);
                 return;
             }
 
-            // Agrupar por SKU y calcular totales
+            if (!ordenes || ordenes.length === 0) {
+                console.log('No hay órdenes en los últimos 90 días');
+                return;
+            }
+
+            console.log(`Procesando ${ordenes.length} órdenes para calcular ventas...`);
+
+            // Agrupar por SKU y por id_item (MLA...) para calcular totales
             const ventasPorSku = {};
+            const ventasPorItem = {};
+
             ordenes.forEach(orden => {
-                const sku = orden.sku;
-                if (!ventasPorSku[sku]) {
-                    ventasPorSku[sku] = 0;
+                // Por SKU (si está disponible)
+                if (orden.sku) {
+                    if (!ventasPorSku[orden.sku]) {
+                        ventasPorSku[orden.sku] = { total: 0, ordenes: [] };
+                    }
+                    ventasPorSku[orden.sku].total += orden.cantidad || 1;
+                    ventasPorSku[orden.sku].ordenes.push(orden.cantidad || 1);
                 }
-                ventasPorSku[sku] += orden.cantidad || 1;
+
+                // Por id_item (MLA...) siempre
+                if (orden.id_item) {
+                    if (!ventasPorItem[orden.id_item]) {
+                        ventasPorItem[orden.id_item] = { total: 0, ordenes: [] };
+                    }
+                    ventasPorItem[orden.id_item].total += orden.cantidad || 1;
+                    ventasPorItem[orden.id_item].ordenes.push(orden.cantidad || 1);
+                }
             });
 
-            // Calcular ventas diarias y actualizar publicaciones
-            for (const [sku, totalVentas] of Object.entries(ventasPorSku)) {
-                const ventasDia = totalVentas / DIAS_EVALUACION;
-                const desviacion = ventasDia * 0.3; // Estimación: 30% de variabilidad
+            // Calcular desviación estándar
+            const calcularDesviacion = (ordenes, promedioDiario) => {
+                if (ordenes.length < 2) return promedioDiario * 0.3; // Fallback: 30%
+                const promedio = ordenes.reduce((a, b) => a + b, 0) / ordenes.length;
+                const varianza = ordenes.reduce((acc, val) => acc + Math.pow(val - promedio, 2), 0) / ordenes.length;
+                return Math.sqrt(varianza) || promedioDiario * 0.3;
+            };
 
-                // Actualizar todas las publicaciones con este SKU
+            // Actualizar publicaciones por SKU
+            let actualizados = 0;
+            for (const [sku, datos] of Object.entries(ventasPorSku)) {
+                const ventasDia = datos.total / DIAS_EVALUACION;
+                const desviacion = calcularDesviacion(datos.ordenes, ventasDia);
+
                 const { error: updateError } = await supabase
                     .from('publicaciones_meli')
                     .update({
@@ -794,15 +843,113 @@ export const moduloCalculadora = {
                     })
                     .eq('sku', sku);
 
-                if (updateError) {
-                    console.warn(`Error actualizando ventas para SKU ${sku}:`, updateError);
-                }
+                if (!updateError) actualizados++;
             }
 
-            console.log(`✓ Ventas diarias calculadas para ${Object.keys(ventasPorSku).length} SKUs (JS fallback)`);
+            // Actualizar publicaciones por id_publicacion (MLA...)
+            for (const [idItem, datos] of Object.entries(ventasPorItem)) {
+                const ventasDia = datos.total / DIAS_EVALUACION;
+                const desviacion = calcularDesviacion(datos.ordenes, ventasDia);
+
+                const { error: updateError } = await supabase
+                    .from('publicaciones_meli')
+                    .update({
+                        ventas_dia: ventasDia,
+                        desviacion: desviacion
+                    })
+                    .eq('id_publicacion', idItem);
+
+                if (!updateError) actualizados++;
+            }
+
+            console.log(`✓ Ventas diarias calculadas: ${actualizados} registros actualizados (${DIAS_EVALUACION} días)`);
 
         } catch (err) {
             console.error('Error calculando ventas diarias en JS:', err);
+        }
+    },
+
+    // ============================================
+    // CALCULAR STOCK EN TRÁNSITO: Desde envíos activos
+    // Suma cantidades de envíos con estado "En Preparación" o "Despachado"
+    // ============================================
+    calcularStockTransitoJS: async () => {
+        try {
+            // 1. Obtener envíos activos (En Preparación o Despachado)
+            const { data: enviosActivos, error: errorEnvios } = await supabase
+                .from('registro_envios_full')
+                .select('id_envio')
+                .in('estado', ['En Preparación', 'Despachado']);
+
+            if (errorEnvios) {
+                console.error('Error consultando envíos activos:', errorEnvios);
+                return;
+            }
+
+            if (!enviosActivos || enviosActivos.length === 0) {
+                console.log('No hay envíos activos, limpiando stock en tránsito...');
+                // Limpiar stock_transito de todas las publicaciones
+                await supabase
+                    .from('publicaciones_meli')
+                    .update({ stock_transito: 0 })
+                    .neq('stock_transito', 0);
+                return;
+            }
+
+            const idsEnvios = enviosActivos.map(e => e.id_envio);
+            console.log(`Calculando tránsito desde ${idsEnvios.length} envíos activos...`);
+
+            // 2. Obtener detalles de esos envíos
+            const { data: detalles, error: errorDetalles } = await supabase
+                .from('detalle_envios_full')
+                .select('sku, id_publicacion, cantidad_enviada')
+                .in('id_envio', idsEnvios);
+
+            if (errorDetalles) {
+                console.error('Error consultando detalles:', errorDetalles);
+                return;
+            }
+
+            // 3. Agrupar por SKU y por id_publicacion
+            const transitoPorSku = {};
+            const transitoPorItem = {};
+
+            detalles.forEach(d => {
+                if (d.sku) {
+                    transitoPorSku[d.sku] = (transitoPorSku[d.sku] || 0) + (d.cantidad_enviada || 0);
+                }
+                if (d.id_publicacion) {
+                    transitoPorItem[d.id_publicacion] = (transitoPorItem[d.id_publicacion] || 0) + (d.cantidad_enviada || 0);
+                }
+            });
+
+            // 4. Primero resetear todos los stock_transito a 0
+            await supabase
+                .from('publicaciones_meli')
+                .update({ stock_transito: 0 })
+                .neq('stock_transito', 0);
+
+            // 5. Actualizar con los valores calculados por SKU
+            for (const [sku, cantidad] of Object.entries(transitoPorSku)) {
+                await supabase
+                    .from('publicaciones_meli')
+                    .update({ stock_transito: cantidad })
+                    .eq('sku', sku);
+            }
+
+            // 6. Actualizar por id_publicacion
+            for (const [idPub, cantidad] of Object.entries(transitoPorItem)) {
+                await supabase
+                    .from('publicaciones_meli')
+                    .update({ stock_transito: cantidad })
+                    .eq('id_publicacion', idPub);
+            }
+
+            const totalSkus = Object.keys(transitoPorSku).length + Object.keys(transitoPorItem).length;
+            console.log(`✓ Stock en tránsito actualizado para ${totalSkus} productos`);
+
+        } catch (err) {
+            console.error('Error calculando stock en tránsito:', err);
         }
     },
 
@@ -864,6 +1011,203 @@ export const moduloCalculadora = {
             // Aún así retorna success para que el cálculo continúe
             return { success: true, source: 'cache' };
         }
+    },
+
+    // ============================================
+    // DIAGNÓSTICO: Verificar estado de los datos
+    // ============================================
+    diagnosticar: async () => {
+        const appContent = document.getElementById('app-content');
+
+        appContent.innerHTML = `
+            <div class="max-w-4xl mx-auto">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-stethoscope text-yellow-500"></i>
+                        Diagnóstico de Datos
+                    </h3>
+                    <div id="diagnostico-resultado" class="text-center py-8">
+                        <i class="fas fa-spinner fa-spin fa-2x text-gray-400 mb-4"></i>
+                        <p class="text-gray-500">Analizando datos...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const resultado = document.getElementById('diagnostico-resultado');
+        let html = '';
+
+        try {
+            // 1. Total publicaciones
+            const { count: totalPubs } = await supabase
+                .from('publicaciones_meli')
+                .select('*', { count: 'exact', head: true });
+
+            // 2. Publicaciones fulfillment
+            const { data: fullPubs, count: countFull } = await supabase
+                .from('publicaciones_meli')
+                .select('sku, titulo, stock_full, ventas_90d, ventas_dia, tipo_logistica', { count: 'exact' })
+                .eq('tipo_logistica', 'fulfillment')
+                .limit(5);
+
+            // 3. Publicaciones con stock > 0
+            const { count: conStock } = await supabase
+                .from('publicaciones_meli')
+                .select('*', { count: 'exact', head: true })
+                .gt('stock_full', 0);
+
+            // 4. Publicaciones con ventas_90d > 0
+            const { count: conVentas90 } = await supabase
+                .from('publicaciones_meli')
+                .select('*', { count: 'exact', head: true })
+                .gt('ventas_90d', 0);
+
+            // 5. Publicaciones con ventas_dia > 0
+            const { count: conVentasDia } = await supabase
+                .from('publicaciones_meli')
+                .select('*', { count: 'exact', head: true })
+                .gt('ventas_dia', 0);
+
+            // 6. Total órdenes
+            const { count: totalOrdenes } = await supabase
+                .from('ordenes_meli')
+                .select('*', { count: 'exact', head: true });
+
+            // 7. Órdenes últimos 90 días
+            const fechaDesde = new Date();
+            fechaDesde.setDate(fechaDesde.getDate() - 90);
+            const { data: ordenesRecientes, count: countOrdenesRecientes } = await supabase
+                .from('ordenes_meli')
+                .select('id_orden, sku, id_item, cantidad, fecha_creacion', { count: 'exact' })
+                .gte('fecha_creacion', fechaDesde.toISOString())
+                .limit(5);
+
+            // 8. Órdenes con SKU
+            const { count: ordenesConSku } = await supabase
+                .from('ordenes_meli')
+                .select('*', { count: 'exact', head: true })
+                .not('sku', 'is', null);
+
+            // 9. Envíos activos
+            const { count: enviosActivos } = await supabase
+                .from('registro_envios_full')
+                .select('*', { count: 'exact', head: true })
+                .in('estado', ['En Preparación', 'Despachado']);
+
+            // 10. Tipos de logística únicos
+            const { data: tiposLog } = await supabase
+                .from('publicaciones_meli')
+                .select('tipo_logistica')
+                .not('tipo_logistica', 'is', null);
+
+            const tiposUnicos = [...new Set(tiposLog?.map(t => t.tipo_logistica) || [])];
+
+            // Construir HTML del diagnóstico
+            html = `
+                <div class="space-y-6">
+                    <!-- Publicaciones -->
+                    <div class="border-b border-gray-200 pb-4">
+                        <h4 class="font-bold text-gray-700 mb-3">📦 Publicaciones (publicaciones_meli)</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${totalPubs > 0 ? 'text-green-600' : 'text-red-600'}">${totalPubs || 0}</div>
+                                <div class="text-gray-500">Total registros</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${countFull > 0 ? 'text-green-600' : 'text-red-600'}">${countFull || 0}</div>
+                                <div class="text-gray-500">Con tipo_logistica='fulfillment'</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${conStock > 0 ? 'text-green-600' : 'text-orange-600'}">${conStock || 0}</div>
+                                <div class="text-gray-500">Con stock_full > 0</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${conVentas90 > 0 ? 'text-green-600' : 'text-orange-600'}">${conVentas90 || 0}</div>
+                                <div class="text-gray-500">Con ventas_90d > 0</div>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <strong>Tipos de logística encontrados:</strong> ${tiposUnicos.length > 0 ? tiposUnicos.join(', ') : 'Ninguno'}
+                        </div>
+                        ${fullPubs && fullPubs.length > 0 ? `
+                        <div class="mt-3 text-xs">
+                            <strong>Muestra de productos fulfillment:</strong>
+                            <pre class="bg-gray-100 p-2 rounded mt-1 overflow-x-auto">${JSON.stringify(fullPubs, null, 2)}</pre>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <!-- Órdenes -->
+                    <div class="border-b border-gray-200 pb-4">
+                        <h4 class="font-bold text-gray-700 mb-3">🛒 Órdenes (ordenes_meli)</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${totalOrdenes > 0 ? 'text-green-600' : 'text-red-600'}">${totalOrdenes || 0}</div>
+                                <div class="text-gray-500">Total órdenes</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${countOrdenesRecientes > 0 ? 'text-green-600' : 'text-orange-600'}">${countOrdenesRecientes || 0}</div>
+                                <div class="text-gray-500">Últimos 90 días</div>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="text-2xl font-bold ${ordenesConSku > 0 ? 'text-green-600' : 'text-orange-600'}">${ordenesConSku || 0}</div>
+                                <div class="text-gray-500">Con SKU asignado</div>
+                            </div>
+                        </div>
+                        ${ordenesRecientes && ordenesRecientes.length > 0 ? `
+                        <div class="mt-3 text-xs">
+                            <strong>Muestra de órdenes recientes:</strong>
+                            <pre class="bg-gray-100 p-2 rounded mt-1 overflow-x-auto">${JSON.stringify(ordenesRecientes, null, 2)}</pre>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <!-- Envíos -->
+                    <div class="pb-4">
+                        <h4 class="font-bold text-gray-700 mb-3">🚚 Envíos Activos</h4>
+                        <div class="bg-gray-50 p-3 rounded-lg inline-block">
+                            <div class="text-2xl font-bold text-blue-600">${enviosActivos || 0}</div>
+                            <div class="text-gray-500 text-sm">En Preparación / Despachado</div>
+                        </div>
+                    </div>
+
+                    <!-- Diagnóstico -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <h4 class="font-bold text-yellow-800 mb-2">🔍 Diagnóstico</h4>
+                        <ul class="text-sm text-yellow-700 space-y-1">
+                            ${countFull === 0 ? '<li>❌ <strong>No hay productos con tipo_logistica="fulfillment".</strong> Verifica la migración o sincroniza con ML.</li>' : '<li>✅ Hay productos fulfillment</li>'}
+                            ${conStock === 0 ? '<li>❌ <strong>Ningún producto tiene stock_full > 0.</strong> El stock no se está sincronizando desde ML.</li>' : '<li>✅ Hay productos con stock</li>'}
+                            ${totalOrdenes === 0 ? '<li>❌ <strong>No hay órdenes en la base de datos.</strong> Importa órdenes desde GAS o sincroniza con ML.</li>' : '<li>✅ Hay órdenes registradas</li>'}
+                            ${countOrdenesRecientes === 0 && totalOrdenes > 0 ? '<li>⚠️ <strong>No hay órdenes de los últimos 90 días.</strong> Las ventas_dia se calcularán como 0.</li>' : ''}
+                            ${conVentas90 === 0 && conVentasDia === 0 ? '<li>❌ <strong>No hay datos de ventas.</strong> Necesitas importar ventas_90d o tener órdenes recientes.</li>' : '<li>✅ Hay datos de ventas</li>'}
+                        </ul>
+                    </div>
+
+                    <!-- Acciones -->
+                    <div class="flex gap-3 justify-center pt-4">
+                        <button onclick="router.navegar('calculadora')"
+                                class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                            <i class="fas fa-arrow-left mr-2"></i>Volver
+                        </button>
+                        <a href="migracion.html" target="_blank"
+                           class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors">
+                            <i class="fas fa-database mr-2"></i>Ir a Migración
+                        </a>
+                    </div>
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('Error en diagnóstico:', error);
+            html = `
+                <div class="text-center text-red-500">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                    <p>Error al diagnosticar: ${error.message}</p>
+                </div>
+            `;
+        }
+
+        resultado.innerHTML = html;
     }
 };
 
