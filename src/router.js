@@ -3,7 +3,7 @@
 // ============================================
 import { moduloCalculadora } from './modules/calculadoraEnvios.js';
 import { moduloEnviosCreados } from './modules/enviosCreados.js';
-// import { moduloDashboard } from './modules/dashboard.js';
+import { moduloDashboard } from './modules/dashboard.js';
 // import { moduloStock } from './modules/stock.js';
 // import { moduloPrecios } from './modules/precios.js';
 
@@ -48,9 +48,9 @@ export const router = {
                 moduloEnviosCreados.render(appContent);
                 break;
 
-            // case 'dashboard':
-            //     moduloDashboard.render(appContent);
-            //     break;
+            case 'dashboard':
+                moduloDashboard.render(appContent);
+                break;
 
             // case 'stock':
             //     moduloStock.render(appContent);

@@ -171,3 +171,24 @@ export function colorRiesgo(nivel) {
     };
     return colores[nivel] || 'bg-gray-100 text-gray-800';
 }
+
+/**
+ * Formatea un numero como porcentaje
+ * @param {number} valor
+ * @param {number} decimales - Cantidad de decimales (default 1)
+ * @returns {string}
+ */
+export function formatearPorcentaje(valor, decimales = 1) {
+    if (valor === null || valor === undefined || isNaN(valor)) return '0%';
+    return `${Number(valor).toFixed(decimales)}%`;
+}
+
+/**
+ * Formatea un numero con separadores de miles
+ * @param {number} valor
+ * @returns {string}
+ */
+export function formatearNumero(valor) {
+    if (valor === null || valor === undefined || isNaN(valor)) return '0';
+    return new Intl.NumberFormat('es-AR').format(valor);
+}
