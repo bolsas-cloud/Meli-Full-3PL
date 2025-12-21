@@ -7,10 +7,9 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // ============================================
 // CONFIGURACIÓN DE MERCADO LIBRE
 // ============================================
-// IMPORTANTE: Completar después de crear la app en developers.mercadolibre.com
 export const MELI_CONFIG = {
-    APP_ID: '',           // Tu App ID (número)
-    CLIENT_SECRET: '',    // Tu Client Secret
+    APP_ID: '4370336012652573',
+    CLIENT_SECRET: 'LXRXjcqrcWxDemTEv7Iq8GVIMBOsUZzB',
     REDIRECT_URI: 'https://meli-full-3pl.vercel.app/callback.html',
     AUTH_URL: 'https://auth.mercadolibre.com.ar/authorization',
     TOKEN_URL: 'https://api.mercadolibre.com/oauth/token',
