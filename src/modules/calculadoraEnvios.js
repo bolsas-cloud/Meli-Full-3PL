@@ -248,20 +248,23 @@ export const moduloCalculadora = {
             const Z = parseFloat(document.getElementById('param-servicio').value) || 1.65;
             const incremento = parseFloat(document.getElementById('param-evento').value) || 0;
 
-            // Obtener datos de sugerencias (si ya existen calculados)
-            // Por ahora usamos datos de ejemplo hasta integrar con API de ML
-            const { data: dataSugerencias, error } = await supabase
-                .from('sugerencias_envio_full')
-                .select('*')
-                .order('nivel_riesgo', { ascending: true });
+            // Intentar obtener productos REALES de Supabase
+            const { data: productosReales, error } = await supabase
+                .from('publicaciones_meli')
+                .select('sku, titulo, ventas_90d, stock_full, stock_transito, ventas_dia, desviacion, id_inventario')
+                .eq('tipo_logistica', 'fulfillment')
+                .order('ventas_90d', { ascending: false });
 
             if (error) throw error;
 
-            if (!dataSugerencias || dataSugerencias.length === 0) {
+            if (productosReales && productosReales.length > 0) {
+                // Calcular sugerencias con datos reales
+                sugerencias = moduloCalculadora.calcularSugerencias(productosReales, Tt, Fe, Z, incremento);
+                mostrarNotificacion(`${sugerencias.length} productos analizados`, 'success');
+            } else {
                 // Datos de demo si no hay datos reales
                 sugerencias = moduloCalculadora.generarDatosDemo(Tt, Fe, Z, incremento);
-            } else {
-                sugerencias = dataSugerencias;
+                mostrarNotificacion('Usando datos de demostración. Importa datos reales desde Migración.', 'info');
             }
 
             // Pintar tabla
@@ -281,6 +284,71 @@ export const moduloCalculadora = {
                 </tr>
             `;
         }
+    },
+
+    // ============================================
+    // CALCULAR: Sugerencias con datos reales
+    // ============================================
+    calcularSugerencias: (productos, Tt, Fe, Z, incremento) => {
+        const DIAS_PERIODO = 90; // Período para calcular ventas diarias
+
+        return productos.map(p => {
+            // Calcular ventas diarias desde ventas_90d si no está calculado
+            const ventasDia = p.ventas_dia || (p.ventas_90d ? p.ventas_90d / DIAS_PERIODO : 0);
+            const stockFull = p.stock_full || 0;
+            const stockTransito = p.stock_transito || 0;
+            const sigma = p.desviacion || (ventasDia * 0.3); // Usar 30% como estimación si no hay datos
+
+            // Lead Time total = Tiempo Tránsito + Frecuencia de Envío
+            const leadTime = Tt + Fe;
+
+            // Stock de Seguridad: Ss = Z × σ × √L
+            let stockSeguridad = Z * sigma * Math.sqrt(leadTime);
+
+            // Aplicar incremento por evento
+            if (incremento > 0) {
+                stockSeguridad = stockSeguridad * (1 + incremento / 100);
+            }
+
+            // Demanda esperada en el período
+            const demandaPeriodo = ventasDia * leadTime * (1 + incremento / 100);
+
+            // Cantidad a enviar: Q* = Demanda + Ss - Stock Actual - En Tránsito
+            const cantidadIdeal = Math.ceil(demandaPeriodo + stockSeguridad - stockFull - stockTransito);
+
+            // Días de cobertura
+            const diasCobertura = ventasDia > 0 ? stockFull / ventasDia : 999;
+
+            // Nivel de riesgo
+            let nivelRiesgo = 'OK';
+            if (diasCobertura < 3) {
+                nivelRiesgo = 'CRÍTICO';
+            } else if (diasCobertura < 7) {
+                nivelRiesgo = 'BAJO';
+            } else if (diasCobertura < 14) {
+                nivelRiesgo = 'NORMAL';
+            }
+
+            return {
+                sku: p.sku,
+                titulo: p.titulo,
+                ventas_dia: ventasDia,
+                stock_actual_full: stockFull,
+                stock_en_transito: stockTransito,
+                stock_seguridad: Math.ceil(stockSeguridad),
+                dias_cobertura: diasCobertura,
+                cantidad_a_enviar: Math.max(0, cantidadIdeal),
+                nivel_riesgo: nivelRiesgo,
+                id_inventario: p.id_inventario
+            };
+        }).sort((a, b) => {
+            // Ordenar: CRÍTICO primero, luego por cantidad a enviar
+            const ordenRiesgo = { 'CRÍTICO': 0, 'BAJO': 1, 'NORMAL': 2, 'OK': 3 };
+            if (ordenRiesgo[a.nivel_riesgo] !== ordenRiesgo[b.nivel_riesgo]) {
+                return ordenRiesgo[a.nivel_riesgo] - ordenRiesgo[b.nivel_riesgo];
+            }
+            return b.cantidad_a_enviar - a.cantidad_a_enviar;
+        });
     },
 
     // ============================================

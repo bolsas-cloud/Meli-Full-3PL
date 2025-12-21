@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migración de Datos - Meli Full 3PL</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            DEFAULT: '#4EAB87',
+                            dark: '#3d8c6c',
+                            light: '#f0f9f6'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen p-8">
+
+    <div class="max-w-4xl mx-auto">
+
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">
+                <i class="fas fa-database text-brand mr-2"></i>
+                Migración de Datos
+            </h1>
+            <p class="text-gray-600">Importar datos desde Google Sheets a Supabase</p>
+        </header>
+
+        <!-- Instrucciones -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-info-circle text-blue-500 mr-2"></i>
+                Instrucciones
+            </h2>
+            <ol class="list-decimal list-inside space-y-2 text-gray-600">
+                <li>Abre tu Google Sheets con los datos de Meli+Full</li>
+                <li>Selecciona la hoja que quieres migrar</li>
+                <li>Copia todos los datos (Ctrl+A, Ctrl+C) <strong>incluyendo los encabezados</strong></li>
+                <li>Pega los datos en el área de texto de abajo</li>
+                <li>Selecciona el tipo de datos y haz clic en "Importar"</li>
+            </ol>
+        </div>
+
+        <!-- Selector de tipo de datos -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-cog text-brand mr-2"></i>
+                Configuración
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Tipo de Datos
+                    </label>
+                    <select id="tipo-datos" class="w-full border border-gray-300 rounded-lg px-4 py-2">
+                        <option value="publicaciones">Publicaciones (Hoja 1)</option>
+                        <option value="ordenes">Órdenes (Meli_Ordenes_Detalle)</option>
+                        <option value="sugerencias">Sugerencias (Sugerencias_Envio_Full)</option>
+                        <option value="envios">Envíos (Registro_Envios_Full)</option>
+                        <option value="config">Configuración (Config_Logistica)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Modo de Importación
+                    </label>
+                    <select id="modo-importacion" class="w-full border border-gray-300 rounded-lg px-4 py-2">
+                        <option value="upsert">Actualizar existentes (recomendado)</option>
+                        <option value="insert">Solo insertar nuevos</option>
+                        <option value="replace">Reemplazar todo</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Área de datos -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-paste text-brand mr-2"></i>
+                Datos a Importar
+            </h2>
+
+            <textarea id="datos-csv"
+                      class="w-full h-64 border border-gray-300 rounded-lg px-4 py-3 font-mono text-sm"
+                      placeholder="Pega aquí los datos copiados de Google Sheets...
+
+Ejemplo para Publicaciones:
+SKU	Título	Visitas (90d)	Ventas (90d)	...
+LAC101500XACRC050	Bolsa Lienzo...	0	77	..."></textarea>
+
+            <div class="mt-4 flex gap-3">
+                <button onclick="importarDatos()"
+                        class="bg-brand text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-dark transition-colors flex items-center gap-2">
+                    <i class="fas fa-upload"></i>
+                    Importar Datos
+                </button>
+                <button onclick="limpiarDatos()"
+                        class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors">
+                    <i class="fas fa-trash"></i>
+                    Limpiar
+                </button>
+                <button onclick="previsualizarDatos()"
+                        class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg font-medium hover:bg-blue-100 transition-colors">
+                    <i class="fas fa-eye"></i>
+                    Previsualizar
+                </button>
+            </div>
+        </div>
+
+        <!-- Resultado -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6" id="resultado-container" style="display: none;">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                Resultado
+            </h2>
+            <div id="resultado" class="text-gray-600"></div>
+        </div>
+
+        <!-- Previsualización -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6" id="preview-container" style="display: none;">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">
+                <i class="fas fa-table text-blue-500 mr-2"></i>
+                Previsualización (primeras 5 filas)
+            </h2>
+            <div id="preview" class="overflow-x-auto"></div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Configuración Supabase
+        const SUPABASE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwd3NkcHp4emhsbW96emFzbnF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyNzgzNDAsImV4cCI6MjA4MTg1NDM0MH0.yPjNhAdJ71UFGbT5l1R96ZbxPr3C5_zKtqNNKMUmvzk';
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // Mapeo de columnas por tipo de datos
+        const MAPEO_COLUMNAS = {
+            publicaciones: {
+                tabla: 'publicaciones_meli',
+                clavePrimaria: 'sku',
+                columnas: {
+                    'SKU': 'sku',
+                    'Título': 'titulo',
+                    'Visitas (90d)': 'visitas_90d',
+                    'Ventas (90d)': 'ventas_90d',
+                    'Conversión %': 'conversion_pct',
+                    'Promo Activa?': 'promo_activa',
+                    'ID Publicación': 'id_publicacion',
+                    'ID Inventario': 'id_inventario',
+                    'Precio': 'precio',
+                    'Categoria_ID': 'categoria_id',
+                    'Tipo_Publicacion': 'tipo_publicacion',
+                    'Comision_ML': 'comision_ml',
+                    'Cargo_Fijo_ML': 'cargo_fijo_ml',
+                    'Costo_Envio_ML': 'costo_envio_ml',
+                    'Impuestos_Estimados': 'impuestos_estimados',
+                    'Neto_Estimado': 'neto_estimado',
+                    'Tipo_Logistica': 'tipo_logistica',
+                    'Tiene_Envio_Gratis': 'tiene_envio_gratis',
+                    'Clasificacion_Full': 'clasificacion_full',
+                    'Peso_gr': 'peso_gr',
+                    'Alto_cm': 'alto_cm',
+                    'Ancho_cm': 'ancho_cm',
+                    'Largo_cm': 'largo_cm'
+                }
+            },
+            ordenes: {
+                tabla: 'ordenes_meli',
+                clavePrimaria: 'id_orden',
+                columnas: {
+                    'ID Orden': 'id_orden',
+                    'Fecha Creación Orden': 'fecha_creacion',
+                    'Fecha de Pago': 'fecha_pago',
+                    'Estado Orden': 'estado',
+                    'ID Item': 'id_item',
+                    'Titulo Item': 'titulo_item',
+                    'Cantidad': 'cantidad',
+                    'Precio Unitario (Lista)': 'precio_unitario',
+                    'Total Lista': 'total_lista',
+                    'ID Pago': 'id_pago',
+                    'Neto Recibido Item (Aprox)': 'neto_recibido',
+                    'Costo Total Meli (Aprox)': 'costo_meli',
+                    '% Costo Meli (s/Total Lista)': 'pct_costo_meli',
+                    'Comprador Nickname': 'comprador_nickname'
+                }
+            },
+            sugerencias: {
+                tabla: 'sugerencias_envio_full',
+                clavePrimaria: 'sku',
+                columnas: {
+                    'SKU': 'sku',
+                    'Título': 'titulo',
+                    'Ventas/Día (V)': 'ventas_dia',
+                    'Stock Actual Full (Sml)': 'stock_actual_full',
+                    'Stock en Tránsito': 'stock_en_transito',
+                    'Stock de Seguridad (Ss)': 'stock_seguridad',
+                    'Días de Cobertura Actual': 'dias_cobertura',
+                    'Cantidad a Enviar': 'cantidad_a_enviar',
+                    'Nivel de Riesgo': 'nivel_riesgo'
+                }
+            },
+            envios: {
+                tabla: 'registro_envios_full',
+                clavePrimaria: 'id_envio',
+                columnas: {
+                    'ID_Envio': 'id_envio',
+                    'ID_Envio_ML': 'id_envio_ml',
+                    'Estado': 'estado',
+                    'Fecha_Creacion': 'fecha_creacion',
+                    'Fecha_Colecta': 'fecha_colecta',
+                    'Fecha_Ingreso_Estimada': 'fecha_ingreso_estimada',
+                    'Link_PDF': 'link_pdf',
+                    'Notas': 'notas'
+                }
+            },
+            config: {
+                tabla: 'config_logistica',
+                clavePrimaria: 'parametro',
+                columnas: {
+                    'Parametro': 'parametro',
+                    'Valor': 'valor'
+                }
+            }
+        };
+
+        // Parsear datos pegados (formato TSV de Google Sheets)
+        function parsearDatos(texto) {
+            const lineas = texto.trim().split('\n');
+            if (lineas.length < 2) return { headers: [], datos: [] };
+
+            // Detectar separador (tab o coma)
+            const separador = lineas[0].includes('\t') ? '\t' : ',';
+
+            const headers = lineas[0].split(separador).map(h => h.trim());
+            const datos = [];
+
+            for (let i = 1; i < lineas.length; i++) {
+                const valores = lineas[i].split(separador);
+                if (valores.length >= headers.length / 2) { // Al menos la mitad de columnas
+                    const fila = {};
+                    headers.forEach((header, idx) => {
+                        fila[header] = valores[idx]?.trim() || '';
+                    });
+                    datos.push(fila);
+                }
+            }
+
+            return { headers, datos };
+        }
+
+        // Limpiar valor para la base de datos
+        function limpiarValor(valor, columna) {
+            if (!valor || valor === '' || valor === '(vacío)') return null;
+
+            // Remover símbolos de moneda
+            if (typeof valor === 'string') {
+                valor = valor.replace(/[$\s]/g, '').replace(',', '.');
+            }
+
+            // Convertir porcentajes
+            if (columna.includes('pct') || columna.includes('conversion')) {
+                valor = String(valor).replace('%', '');
+                return parseFloat(valor) || 0;
+            }
+
+            // Convertir booleanos
+            if (columna.includes('promo') || columna.includes('envio_gratis')) {
+                return valor === 'Sí' || valor === 'true' || valor === '1';
+            }
+
+            // Convertir fechas
+            if (columna.includes('fecha')) {
+                const fecha = new Date(valor);
+                return isNaN(fecha.getTime()) ? null : fecha.toISOString();
+            }
+
+            // Convertir números
+            if (columna.includes('stock') || columna.includes('cantidad') ||
+                columna.includes('90d') || columna.includes('dia')) {
+                return parseInt(valor) || 0;
+            }
+
+            if (columna.includes('precio') || columna.includes('costo') ||
+                columna.includes('neto') || columna.includes('_cm') ||
+                columna.includes('_gr') || columna.includes('cobertura')) {
+                return parseFloat(valor) || 0;
+            }
+
+            return valor;
+        }
+
+        // Transformar datos según mapeo
+        function transformarDatos(datos, tipo) {
+            const mapeo = MAPEO_COLUMNAS[tipo];
+            if (!mapeo) return [];
+
+            return datos.map(fila => {
+                const registro = {};
+                Object.keys(mapeo.columnas).forEach(headerOriginal => {
+                    const columnaDB = mapeo.columnas[headerOriginal];
+                    if (fila[headerOriginal] !== undefined) {
+                        registro[columnaDB] = limpiarValor(fila[headerOriginal], columnaDB);
+                    }
+                });
+                return registro;
+            }).filter(r => r[mapeo.clavePrimaria]); // Solo filas con clave primaria
+        }
+
+        // Previsualizar datos
+        window.previsualizarDatos = function() {
+            const texto = document.getElementById('datos-csv').value;
+            const { headers, datos } = parsearDatos(texto);
+
+            if (datos.length === 0) {
+                alert('No se encontraron datos para previsualizar');
+                return;
+            }
+
+            const tipo = document.getElementById('tipo-datos').value;
+            const datosTransformados = transformarDatos(datos.slice(0, 5), tipo);
+
+            let html = '<table class="min-w-full divide-y divide-gray-200 text-sm">';
+            html += '<thead class="bg-gray-50"><tr>';
+            Object.keys(datosTransformados[0] || {}).forEach(col => {
+                html += `<th class="px-3 py-2 text-left font-medium text-gray-600">${col}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+
+            datosTransformados.forEach(fila => {
+                html += '<tr class="border-b border-gray-100">';
+                Object.values(fila).forEach(val => {
+                    html += `<td class="px-3 py-2">${val ?? '-'}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            html += `<p class="mt-4 text-sm text-gray-500">Total de filas: ${datos.length}</p>`;
+
+            document.getElementById('preview').innerHTML = html;
+            document.getElementById('preview-container').style.display = 'block';
+        };
+
+        // Importar datos a Supabase
+        window.importarDatos = async function() {
+            const texto = document.getElementById('datos-csv').value;
+            const tipo = document.getElementById('tipo-datos').value;
+            const modo = document.getElementById('modo-importacion').value;
+
+            const { headers, datos } = parsearDatos(texto);
+
+            if (datos.length === 0) {
+                mostrarResultado('error', 'No se encontraron datos para importar');
+                return;
+            }
+
+            const mapeo = MAPEO_COLUMNAS[tipo];
+            const datosTransformados = transformarDatos(datos, tipo);
+
+            if (datosTransformados.length === 0) {
+                mostrarResultado('error', 'Los datos no coinciden con el formato esperado');
+                return;
+            }
+
+            mostrarResultado('info', `Importando ${datosTransformados.length} registros...`);
+
+            try {
+                let resultado;
+
+                if (modo === 'replace') {
+                    // Eliminar todos los registros existentes
+                    await supabase.from(mapeo.tabla).delete().neq(mapeo.clavePrimaria, '');
+                }
+
+                if (modo === 'upsert' || modo === 'replace') {
+                    // Upsert en lotes de 100
+                    const BATCH_SIZE = 100;
+                    let insertados = 0;
+                    let errores = 0;
+
+                    for (let i = 0; i < datosTransformados.length; i += BATCH_SIZE) {
+                        const lote = datosTransformados.slice(i, i + BATCH_SIZE);
+                        const { error } = await supabase
+                            .from(mapeo.tabla)
+                            .upsert(lote, { onConflict: mapeo.clavePrimaria });
+
+                        if (error) {
+                            console.error('Error en lote:', error);
+                            errores += lote.length;
+                        } else {
+                            insertados += lote.length;
+                        }
+                    }
+
+                    resultado = { insertados, errores };
+                } else {
+                    // Solo insert (ignora duplicados)
+                    const { data, error } = await supabase
+                        .from(mapeo.tabla)
+                        .insert(datosTransformados)
+                        .select();
+
+                    if (error) throw error;
+                    resultado = { insertados: data?.length || 0, errores: 0 };
+                }
+
+                mostrarResultado('success',
+                    `Importación completada:<br>
+                    - Registros procesados: ${datosTransformados.length}<br>
+                    - Insertados/Actualizados: ${resultado.insertados}<br>
+                    ${resultado.errores > 0 ? `- Errores: ${resultado.errores}` : ''}`
+                );
+
+            } catch (error) {
+                console.error('Error importando:', error);
+                mostrarResultado('error', `Error: ${error.message}`);
+            }
+        };
+
+        // Limpiar área de datos
+        window.limpiarDatos = function() {
+            document.getElementById('datos-csv').value = '';
+            document.getElementById('preview-container').style.display = 'none';
+            document.getElementById('resultado-container').style.display = 'none';
+        };
+
+        // Mostrar resultado
+        function mostrarResultado(tipo, mensaje) {
+            const container = document.getElementById('resultado-container');
+            const resultado = document.getElementById('resultado');
+
+            const colores = {
+                success: 'text-green-600',
+                error: 'text-red-600',
+                info: 'text-blue-600'
+            };
+
+            const iconos = {
+                success: 'fa-check-circle text-green-500',
+                error: 'fa-times-circle text-red-500',
+                info: 'fa-spinner fa-spin text-blue-500'
+            };
+
+            container.querySelector('h2 i').className = `fas ${iconos[tipo]} mr-2`;
+            resultado.className = colores[tipo];
+            resultado.innerHTML = mensaje;
+            container.style.display = 'block';
+        }
+    </script>
+
+</body>
+</html>
