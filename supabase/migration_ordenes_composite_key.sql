@@ -22,25 +22,41 @@ CREATE TABLE IF NOT EXISTS ordenes_meli_new (
 );
 
 -- Paso 2: Migrar datos existentes (si hay)
-INSERT INTO ordenes_meli_new (id_orden, id_item, sku, titulo, cantidad, precio_unitario, fecha_orden, estado_orden, comprador_nickname, created_at)
-SELECT
-    id_orden,
-    COALESCE(id_item, id_orden), -- Si no hay id_item, usar id_orden como fallback
-    sku,
-    COALESCE(titulo_item, titulo),
-    cantidad,
-    precio_unitario,
-    COALESCE(fecha_pago, fecha_creacion, NOW()),
-    estado,
-    comprador_nickname,
-    created_at
-FROM ordenes_meli
-ON CONFLICT (id_orden, id_item) DO NOTHING;
+-- NOTA: Solo ejecutar si la tabla ordenes_meli existe y tiene datos
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ordenes_meli' AND table_schema = 'public') THEN
+        INSERT INTO ordenes_meli_new (id_orden, id_item, sku, titulo, cantidad, precio_unitario, fecha_orden, estado_orden, comprador_nickname, created_at)
+        SELECT
+            id_orden,
+            COALESCE(id_item, id_orden), -- Si no hay id_item, usar id_orden como fallback
+            sku,
+            titulo_item,
+            cantidad,
+            precio_unitario,
+            COALESCE(fecha_pago, fecha_creacion, NOW()),
+            estado,
+            comprador_nickname,
+            created_at
+        FROM ordenes_meli
+        ON CONFLICT (id_orden, id_item) DO NOTHING;
+    END IF;
+END $$;
 
--- Paso 3: Renombrar tablas
-DROP TABLE IF EXISTS ordenes_meli_backup;
-ALTER TABLE ordenes_meli RENAME TO ordenes_meli_backup;
-ALTER TABLE ordenes_meli_new RENAME TO ordenes_meli;
+-- Paso 3: Renombrar tablas (solo si existe la tabla vieja)
+DO $$
+BEGIN
+    -- Limpiar backup previo si existe
+    DROP TABLE IF EXISTS ordenes_meli_backup;
+
+    -- Si existe la tabla vieja, renombrarla a backup
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ordenes_meli' AND table_schema = 'public') THEN
+        ALTER TABLE ordenes_meli RENAME TO ordenes_meli_backup;
+    END IF;
+
+    -- Renombrar la nueva tabla
+    ALTER TABLE ordenes_meli_new RENAME TO ordenes_meli;
+END $$;
 
 -- Paso 4: Crear índices
 CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_meli(fecha_orden);
