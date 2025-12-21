@@ -25,7 +25,9 @@ Meli-Full-3PL/
 │       ├── auth.js         # Autenticacion OAuth2
 │       ├── calculadoraEnvios.js  # Calculadora de reposicion
 │       ├── enviosCreados.js      # Gestion de envios
-│       └── dashboard.js          # Dashboard KPIs
+│       ├── dashboard.js          # Dashboard KPIs
+│       ├── precios.js            # Gestion de precios
+│       └── publicaciones.js      # Gestion de publicaciones
 ├── supabase/
 │   ├── schema.sql          # Esquema principal
 │   ├── functions_calculos.sql    # RPCs calculadora
@@ -49,9 +51,10 @@ Meli-Full-3PL/
 |--------|--------|---------|
 | Autenticacion OAuth2 | Completo | `src/modules/auth.js` |
 | Calculadora Envios | Completo | `src/modules/calculadoraEnvios.js` |
-| Envios Creados | ~85% | `src/modules/enviosCreados.js` |
+| Envios Creados | ~90% | `src/modules/enviosCreados.js` |
 | Dashboard | Completo | `src/modules/dashboard.js` |
 | Gestion de Precios | Completo | `src/modules/precios.js` |
+| Gestion de Publicaciones | Completo | `src/modules/publicaciones.js` |
 
 ### Pendientes
 
