@@ -707,27 +707,35 @@ export const moduloDashboard = {
             btn.classList.add('opacity-50', 'cursor-not-allowed');
             icon.classList.add('fa-spin');
 
-            mostrarNotificacion('Sincronizando ordenes desde Mercado Libre...', 'info');
+            mostrarNotificacion('Sincronizando ordenes y publicidad...', 'info');
 
-            // Llamar a la Edge Function - Solo ordenes para el Dashboard
-            // (sync incremental desde ultima orden existente)
-            const { data, error } = await supabase.functions.invoke('sync-meli', {
-                body: { action: 'sync-orders' }
-            });
+            // Llamar a las Edge Functions en PARALELO:
+            // - sync-orders: ordenes (incremental)
+            // - sync-ads: costos de publicidad (incremental)
+            const [ordersResult, adsResult] = await Promise.all([
+                supabase.functions.invoke('sync-meli', { body: { action: 'sync-orders' } }),
+                supabase.functions.invoke('sync-meli', { body: { action: 'sync-ads' } })
+            ]);
 
-            if (error) throw error;
+            if (ordersResult.error) throw ordersResult.error;
 
             // Mostrar resultado
-            const ordenes = data?.nuevas || 0;
-            const total = data?.total || 0;
+            const ordenes = ordersResult.data?.nuevas || 0;
+            const total = ordersResult.data?.total || 0;
+            const adsUpdated = adsResult.data?.updated || 0;
 
+            let mensaje = '';
             if (ordenes > 0) {
-                mostrarNotificacion(
-                    `Sincronizacion completada: ${ordenes} ordenes nuevas de ${total} revisadas`,
-                    'success'
-                );
+                mensaje += `${ordenes} ordenes nuevas`;
+            }
+            if (adsUpdated > 0) {
+                mensaje += mensaje ? `, ${adsUpdated} dias de publicidad` : `${adsUpdated} dias de publicidad`;
+            }
+
+            if (mensaje) {
+                mostrarNotificacion(`Sincronizado: ${mensaje}`, 'success');
             } else {
-                mostrarNotificacion('Sin ordenes nuevas', 'info');
+                mostrarNotificacion('Sin datos nuevos', 'info');
             }
 
             // Recargar datos del dashboard
