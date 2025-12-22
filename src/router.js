@@ -4,7 +4,7 @@
 import { moduloCalculadora } from './modules/calculadoraEnvios.js';
 import { moduloEnviosCreados } from './modules/enviosCreados.js';
 import { moduloDashboard } from './modules/dashboard.js';
-// import { moduloStock } from './modules/stock.js';
+import { moduloStock } from './modules/stock.js';
 import { moduloPrecios } from './modules/precios.js';
 import { moduloPublicaciones } from './modules/publicaciones.js';
 
@@ -19,7 +19,7 @@ export const router = {
             'dashboard': 'Dashboard de Ventas',
             'calculadora': 'Calculadora de Envíos a Full',
             'envios': 'Envíos Creados',
-            'stock': 'Gestión de Stock',
+            'stock': 'Seguimiento de Stock',
             'precios': 'Gestión de Precios',
             'publicaciones': 'Gestión de Publicaciones',
             'reconciliacion': 'Reconciliación 3PL'
@@ -54,9 +54,9 @@ export const router = {
                 moduloDashboard.render(appContent);
                 break;
 
-            // case 'stock':
-            //     moduloStock.render(appContent);
-            //     break;
+            case 'stock':
+                moduloStock.render(appContent);
+                break;
 
             case 'precios':
                 moduloPrecios.render(appContent);

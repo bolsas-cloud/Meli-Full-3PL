@@ -24,7 +24,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    const { action, fechaDesde, productos } = await req.json()
+    const { action, fechaDesde, productos, cambiosStock } = await req.json()
 
     // Obtener token de ML desde config_meli (donde lo guarda el frontend)
     const { data: tokenData, error: tokenError } = await supabase
@@ -103,6 +103,9 @@ serve(async (req) => {
       case 'sync-ads':
         return await syncAds(supabase, accessToken)
 
+      case 'update-stock':
+        return await updateStock(supabase, accessToken, cambiosStock)
+
       default:
         return new Response(
           JSON.stringify({ error: 'Acción no válida' }),
@@ -120,7 +123,11 @@ serve(async (req) => {
 })
 
 // ============================================
-// SINCRONIZAR INVENTARIO (Stock Full)
+// SINCRONIZAR INVENTARIO (Stock Full + Depósito + Flex)
+// Replica la lógica de GAS: obtenerResumenDeStock()
+// - Usa /items con user_product_id para obtener el ID de producto
+// - Usa /user-products/{id}/stock para obtener stock distribuido
+// - Detecta Flex via shipping.tags (self_service_in)
 // ============================================
 async function syncInventory(supabase: any, accessToken: string, sellerId: string) {
   const result = await syncInventoryInternal(supabase, accessToken, sellerId)
@@ -137,10 +144,13 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
   const BATCH_SIZE = 20  // ML multiget soporta hasta 20 items por llamada
 
   try {
-    // Obtener todos los items con fulfillment
+    // ============================================
+    // Obtener TODOS los items activos y pausados (no solo fulfillment)
+    // Esto replica la lógica de GAS que lee de Hoja 1
+    // ============================================
     while (true) {
       const response = await fetch(
-        `${ML_API_BASE}/users/${sellerId}/items/search?status=active&logistics_type=fulfillment&offset=${offset}&limit=${limit}`,
+        `${ML_API_BASE}/users/${sellerId}/items/search?status=active,paused&offset=${offset}&limit=${limit}`,
         { headers: { 'Authorization': `Bearer ${accessToken}` } }
       )
 
@@ -153,15 +163,15 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
       // ============================================
       // BATCH REQUESTS: Obtener items en grupos de 20
-      // Usa multiget: /items?ids=ID1,ID2,...
+      // Incluimos user_product_id y shipping para detectar Flex
       // ============================================
       for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
         const batchIds = itemIds.slice(i, i + BATCH_SIZE)
 
         try {
-          // Multiget: obtener múltiples items en una sola llamada
+          // Multiget con atributos específicos (igual que GAS)
           const batchResponse = await fetch(
-            `${ML_API_BASE}/items?ids=${batchIds.join(',')}`,
+            `${ML_API_BASE}/items?ids=${batchIds.join(',')}&attributes=id,title,price,status,shipping,user_product_id,seller_custom_field,attributes,variations,inventory_id,available_quantity`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
           )
 
@@ -175,15 +185,15 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
             const item = itemResult.body
 
-            // Buscar SKU en múltiples lugares (igual que GAS)
+            // ============================================
+            // Extraer SKU (igual que antes)
+            // ============================================
             let skuFromApi = null
 
-            // Prioridad 1: seller_custom_field a nivel item
             if (item.seller_custom_field) {
               skuFromApi = item.seller_custom_field
             }
 
-            // Prioridad 2: SELLER_SKU en atributos principales
             if (!skuFromApi && item.attributes && Array.isArray(item.attributes)) {
               const skuAttr = item.attributes.find((attr: any) => attr.id === "SELLER_SKU")
               if (skuAttr && skuAttr.value_name) {
@@ -191,7 +201,6 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
               }
             }
 
-            // Prioridad 3: SKU en variaciones
             if (!skuFromApi && item.variations && Array.isArray(item.variations) && item.variations.length > 0) {
               for (const variation of item.variations) {
                 if (variation.seller_custom_field) {
@@ -208,60 +217,108 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
               }
             }
 
-            // Obtener stock de Full
-            // Método 1: Usar available_quantity del item directamente (como GAS)
-            const inventoryId = item.inventory_id
-            let stockFull = item.available_quantity || 0
-            let stockTransito = 0
+            // ============================================
+            // Detectar tipo logística y Flex (igual que GAS)
+            // ============================================
+            const shipping = item.shipping || {}
+            const tipoLogistica = shipping.logistic_type || 'desconocido'
+            const shippingTags = shipping.tags || []
+            const tieneFlex = shippingTags.includes('self_service_in')
 
-            // Método 2: Si hay inventory_id, intentar obtener detalle adicional
-            if (inventoryId) {
+            // ============================================
+            // Obtener stock distribuido via user_product_id
+            // Endpoint: /user-products/{user_product_id}/stock
+            // Tipos de ubicación:
+            //   - meli_facility: Stock en Full (bodega ML)
+            //   - selling_address: Stock en tu depósito
+            // ============================================
+            let stockFull = 0
+            let stockDeposito = 0
+            let stockTransito = 0
+            const userProductId = item.user_product_id
+
+            if (userProductId) {
               try {
                 const stockResponse = await fetch(
-                  `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
+                  `${ML_API_BASE}/user-products/${userProductId}/stock`,
                   { headers: { 'Authorization': `Bearer ${accessToken}` } }
                 )
 
                 if (stockResponse.ok) {
                   const stockData = await stockResponse.json()
-                  // Usar el valor del inventario si está disponible
-                  if (stockData.available_quantity !== undefined) {
-                    stockFull = stockData.available_quantity
+
+                  if (stockData.locations && Array.isArray(stockData.locations)) {
+                    for (const loc of stockData.locations) {
+                      if (loc.type === 'meli_facility') {
+                        stockFull += loc.quantity || 0
+                      } else if (loc.type === 'selling_address') {
+                        stockDeposito += loc.quantity || 0
+                      }
+                    }
                   }
-                  stockTransito = stockData.in_transit_quantity || 0
                 }
               } catch (stockErr) {
-                // Si falla el endpoint de inventories, ya tenemos stockFull del item
-                console.log(`Usando available_quantity del item para ${item.id}`)
+                console.log(`Error obteniendo stock distribuido para ${item.id}:`, stockErr)
+              }
+            }
+
+            // Fallback: Si no hay user_product_id, usar available_quantity
+            if (!userProductId || (stockFull === 0 && stockDeposito === 0)) {
+              // Para items fulfillment, available_quantity suele ser stock Full
+              if (tipoLogistica === 'fulfillment') {
+                stockFull = item.available_quantity || 0
+              } else {
+                // Para otros tipos, es stock en depósito
+                stockDeposito = item.available_quantity || 0
+              }
+            }
+
+            // Stock en tránsito (solo para fulfillment)
+            const inventoryId = item.inventory_id
+            if (inventoryId && tipoLogistica === 'fulfillment') {
+              try {
+                const transitResponse = await fetch(
+                  `${ML_API_BASE}/inventories/${inventoryId}/stock/fulfillment`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                )
+
+                if (transitResponse.ok) {
+                  const transitData = await transitResponse.json()
+                  stockTransito = transitData.in_transit_quantity || 0
+                }
+              } catch (transitErr) {
+                // Ignorar error de tránsito
               }
             }
 
             // ============================================
-            // LÓGICA GAS: Preservar datos existentes si el nuevo valor es null
+            // Preservar datos existentes si el nuevo valor es null
             // ============================================
-            // Primero obtenemos el registro existente
             const { data: existingRecord } = await supabase
               .from('publicaciones_meli')
               .select('sku, id_inventario')
               .eq('id_publicacion', item.id)
               .single()
 
-            // Usamos el valor nuevo SOLO si no es null, sino preservamos el existente
-            // Esto replica: row[0] = datosApi.sku || row[0] de la GAS
             const finalSku = skuFromApi || existingRecord?.sku || null
             const finalInventoryId = inventoryId || existingRecord?.id_inventario || null
 
-            // Actualizar en Supabase
+            // ============================================
+            // Actualizar en Supabase con todos los campos
+            // ============================================
             const { error } = await supabase
               .from('publicaciones_meli')
               .upsert({
                 id_publicacion: item.id,
-                sku: finalSku,                    // Preserva existente si API devuelve null
+                sku: finalSku,
                 titulo: item.title,
                 stock_full: stockFull,
+                stock_deposito: stockDeposito,
                 stock_transito: stockTransito,
-                id_inventario: finalInventoryId,  // Preserva existente si API devuelve null
-                tipo_logistica: 'fulfillment',
+                tiene_flex: tieneFlex,
+                user_product_id: userProductId || null,
+                id_inventario: finalInventoryId,
+                tipo_logistica: tipoLogistica,
                 precio: item.price,
                 estado: item.status,
                 ultima_sync: new Date().toISOString()
@@ -930,4 +987,160 @@ async function syncAdsInternal(supabase: any, accessToken: string) {
     console.error('Error en syncAds:', error)
     return { success: false, error: (error as Error).message }
   }
+}
+
+// ============================================
+// ACTUALIZAR STOCK (Enviar cambios de stock a ML)
+// Replica la lógica de GAS: actualizarStockYFlexEnLote()
+// - Actualiza stock en depósito via /user-products/{id}/stock
+// - Actualiza estado (pausar/activar) via /items/{id}
+// - Actualiza Flex via shipping configuration
+// ============================================
+interface CambioStock {
+  itemId: string
+  sku: string
+  userProductId: string
+  stockCambiado: boolean
+  nuevoStock: number
+  flexCambiado: boolean
+  nuevoFlex: boolean
+  estadoCambiado: boolean
+  nuevoEstado: string
+}
+
+async function updateStock(supabase: any, accessToken: string, cambios: CambioStock[]) {
+  if (!cambios || cambios.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'No se recibieron cambios para procesar' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const resultados = {
+    exitosos: [] as { itemId: string, sku: string }[],
+    fallidos: [] as { itemId: string, sku: string, error: string }[]
+  }
+
+  console.log(`Iniciando actualización de stock para ${cambios.length} items...`)
+
+  for (const cambio of cambios) {
+    try {
+      // ============================================
+      // Tarea 1: Actualizar Estado (Activa/Pausada)
+      // ============================================
+      if (cambio.estadoCambiado) {
+        console.log(`Actualizando estado para ${cambio.itemId}: ${cambio.nuevoEstado}`)
+
+        const estadoResponse = await fetch(`${ML_API_BASE}/items/${cambio.itemId}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: cambio.nuevoEstado })
+        })
+
+        if (!estadoResponse.ok) {
+          const errorData = await estadoResponse.json()
+          throw new Error(`Error actualizando estado: ${errorData.message || 'Error desconocido'}`)
+        }
+      }
+
+      // ============================================
+      // Tarea 2: Actualizar Stock del Depósito
+      // Endpoint: PUT /user-products/{userProductId}/stock
+      // ============================================
+      if (cambio.stockCambiado && cambio.userProductId) {
+        console.log(`Actualizando stock para ${cambio.itemId}: ${cambio.nuevoStock} unidades`)
+
+        const stockResponse = await fetch(`${ML_API_BASE}/user-products/${cambio.userProductId}/stock`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            locations: [{ type: 'selling_address', quantity: cambio.nuevoStock }]
+          })
+        })
+
+        if (!stockResponse.ok) {
+          const errorData = await stockResponse.json()
+          throw new Error(`Error actualizando stock: ${errorData.message || 'Error desconocido'}`)
+        }
+
+        // Actualizar en Supabase
+        await supabase
+          .from('publicaciones_meli')
+          .update({ stock_deposito: cambio.nuevoStock })
+          .eq('id_publicacion', cambio.itemId)
+      }
+
+      // ============================================
+      // Tarea 3: Actualizar Flex
+      // Requiere leer shipping actual y modificar tags
+      // ============================================
+      if (cambio.flexCambiado) {
+        console.log(`Actualizando Flex para ${cambio.itemId}: ${cambio.nuevoFlex}`)
+
+        // Leer configuración actual del shipping
+        const itemResponse = await fetch(
+          `${ML_API_BASE}/items/${cambio.itemId}?attributes=shipping`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        )
+
+        if (itemResponse.ok) {
+          const itemData = await itemResponse.json()
+          const shippingOriginal = itemData.shipping || {}
+          let tags = shippingOriginal.tags || []
+
+          // Agregar o quitar el tag de Flex
+          if (cambio.nuevoFlex && !tags.includes('self_service_in')) {
+            tags.push('self_service_in')
+          } else if (!cambio.nuevoFlex) {
+            tags = tags.filter((t: string) => t !== 'self_service_in')
+          }
+
+          // Enviar actualización
+          const flexResponse = await fetch(`${ML_API_BASE}/items/${cambio.itemId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              shipping: { ...shippingOriginal, tags }
+            })
+          })
+
+          if (flexResponse.ok) {
+            // Actualizar en Supabase
+            await supabase
+              .from('publicaciones_meli')
+              .update({ tiene_flex: cambio.nuevoFlex })
+              .eq('id_publicacion', cambio.itemId)
+          }
+        }
+      }
+
+      resultados.exitosos.push({ itemId: cambio.itemId, sku: cambio.sku })
+
+    } catch (error) {
+      console.error(`Error procesando ${cambio.itemId}:`, error)
+      resultados.fallidos.push({
+        itemId: cambio.itemId,
+        sku: cambio.sku,
+        error: (error as Error).message
+      })
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: resultados.fallidos.length === 0,
+      exitos: resultados.exitosos.length,
+      fallidos: resultados.fallidos
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
 }
