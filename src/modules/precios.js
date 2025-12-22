@@ -160,10 +160,11 @@ export const moduloPrecios = {
 
     // ============================================
     // CARGAR PRODUCTOS: Sync desde ML y cargar de Supabase
+    // OPTIMIZADO: consultas en paralelo
     // ============================================
     cargarProductos: async () => {
         try {
-            // Primero sincronizamos precios desde ML
+            // Sincronizar precios desde ML
             mostrarNotificacion('Sincronizando precios desde ML...', 'info');
 
             const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-meli', {
@@ -172,35 +173,38 @@ export const moduloPrecios = {
 
             if (syncError) {
                 console.warn('Error sincronizando precios:', syncError);
-                // Continuamos aunque falle el sync
             } else if (syncResult?.updated) {
                 console.log(`Sincronizados ${syncResult.updated} precios`);
             }
 
-            // Obtener % promedio de comisión de las últimas órdenes
-            const { data: ordenesData } = await supabase
-                .from('ordenes_meli')
-                .select('pct_costo_meli')
-                .not('pct_costo_meli', 'is', null)
-                .order('fecha_pago', { ascending: false })
-                .limit(100);
+            // ============================================
+            // PARALELO: Cargar comisión promedio y productos a la vez
+            // ============================================
+            const [ordenesRes, productosRes] = await Promise.all([
+                supabase
+                    .from('ordenes_meli')
+                    .select('pct_costo_meli')
+                    .not('pct_costo_meli', 'is', null)
+                    .order('fecha_pago', { ascending: false })
+                    .limit(100),
+                supabase
+                    .from('publicaciones_meli')
+                    .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica')
+                    .order('titulo')
+            ]);
 
-            if (ordenesData && ordenesData.length > 0) {
-                const suma = ordenesData.reduce((acc, o) => acc + (parseFloat(o.pct_costo_meli) || 0), 0);
-                pctComisionPromedio = suma / ordenesData.length;
-                console.log(`% Comisión promedio calculado: ${pctComisionPromedio.toFixed(2)}% (de ${ordenesData.length} órdenes)`);
+            // Procesar comisión promedio
+            if (ordenesRes.data && ordenesRes.data.length > 0) {
+                const suma = ordenesRes.data.reduce((acc, o) => acc + (parseFloat(o.pct_costo_meli) || 0), 0);
+                pctComisionPromedio = suma / ordenesRes.data.length;
+                console.log(`% Comisión promedio: ${pctComisionPromedio.toFixed(2)}% (de ${ordenesRes.data.length} órdenes)`);
             }
 
-            // Cargar productos desde Supabase
-            const { data, error } = await supabase
-                .from('publicaciones_meli')
-                .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica')
-                .order('titulo');
+            // Procesar productos
+            if (productosRes.error) throw productosRes.error;
 
-            if (error) throw error;
-
-            productos = data || [];
-            productosOriginales = JSON.parse(JSON.stringify(productos)); // Copia profunda para resetear
+            productos = productosRes.data || [];
+            productosOriginales = JSON.parse(JSON.stringify(productos));
             seleccionados.clear();
 
             moduloPrecios.pintarTabla();

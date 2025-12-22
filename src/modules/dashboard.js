@@ -20,6 +20,18 @@ let topProductos = [];
 let ultimaActualizacion = null;
 let chartInstance = null;
 
+// ============================================
+// HELPER: Obtener fecha local en formato YYYY-MM-DD
+// Evita el problema de toISOString() que convierte a UTC
+// (a las 22:00 ARG, UTC ya es el día siguiente)
+// ============================================
+function fechaLocalISO(date = new Date()) {
+    const año = date.getFullYear();
+    const mes = String(date.getMonth() + 1).padStart(2, '0');
+    const dia = String(date.getDate()).padStart(2, '0');
+    return `${año}-${mes}-${dia}`;
+}
+
 export const moduloDashboard = {
 
     // ============================================
@@ -28,8 +40,8 @@ export const moduloDashboard = {
     render: async (contenedor) => {
         // Calcular fechas por defecto (mes actual)
         const hoy = new Date();
-        filtros.hasta = hoy.toISOString().split('T')[0];
-        filtros.desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+        filtros.hasta = fechaLocalISO(hoy);
+        filtros.desde = fechaLocalISO(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
 
         contenedor.innerHTML = `
             <div class="max-w-7xl mx-auto space-y-6">
@@ -587,32 +599,32 @@ export const moduloDashboard = {
 
         switch (periodo) {
             case 'hoy':
-                desde = hasta = hoy.toISOString().split('T')[0];
+                desde = hasta = fechaLocalISO(hoy);
                 break;
 
             case 'ayer':
                 const ayer = new Date(hoy);
                 ayer.setDate(ayer.getDate() - 1);
-                desde = hasta = ayer.toISOString().split('T')[0];
+                desde = hasta = fechaLocalISO(ayer);
                 break;
 
             case '7dias':
                 const hace7 = new Date(hoy);
                 hace7.setDate(hace7.getDate() - 6);
-                desde = hace7.toISOString().split('T')[0];
-                hasta = hoy.toISOString().split('T')[0];
+                desde = fechaLocalISO(hace7);
+                hasta = fechaLocalISO(hoy);
                 break;
 
             case 'mes_actual':
-                desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
-                hasta = hoy.toISOString().split('T')[0];
+                desde = fechaLocalISO(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+                hasta = fechaLocalISO(hoy);
                 break;
 
             case 'mes_anterior':
                 const inicioMesAnt = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
                 const finMesAnt = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
-                desde = inicioMesAnt.toISOString().split('T')[0];
-                hasta = finMesAnt.toISOString().split('T')[0];
+                desde = fechaLocalISO(inicioMesAnt);
+                hasta = fechaLocalISO(finMesAnt);
                 break;
 
             default:

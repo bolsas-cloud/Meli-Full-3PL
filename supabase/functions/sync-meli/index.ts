@@ -515,13 +515,13 @@ async function getSellerIdFromToken(accessToken: string): Promise<string> {
 
 // ============================================
 // SINCRONIZAR PRECIOS (Obtener precios y comisiones de ML)
-// Replica la lógica de GAS: obtiene precio, categoria, tipo_publicacion
-// y luego llama a /sites/MLA/listing_prices para obtener comisiones
+// OPTIMIZADO: usa batch multiget (20 items) + Promise.all para fees
 // ============================================
 async function syncPrices(supabase: any, accessToken: string, sellerId: string) {
   let updated = 0
   let offset = 0
   const limit = 50
+  const BATCH_SIZE = 20  // ML multiget soporta hasta 20 items
 
   try {
     // Obtener todos los items activos y pausados
@@ -538,72 +538,94 @@ async function syncPrices(supabase: any, accessToken: string, sellerId: string) 
 
       if (itemIds.length === 0) break
 
-      // Obtener precio y comisiones de cada item
-      for (const itemId of itemIds) {
+      // ============================================
+      // BATCH MULTIGET: Procesar items en grupos de 20
+      // ============================================
+      for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+        const batchIds = itemIds.slice(i, i + BATCH_SIZE)
+
         try {
-          const itemResponse = await fetch(
-            `${ML_API_BASE}/items/${itemId}`,
+          // Multiget: obtener múltiples items en una sola llamada
+          const batchResponse = await fetch(
+            `${ML_API_BASE}/items?ids=${batchIds.join(',')}`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
           )
 
-          if (!itemResponse.ok) continue
+          if (!batchResponse.ok) continue
 
-          const item = await itemResponse.json()
+          const batchResults = await batchResponse.json()
 
-          // Datos base a actualizar
-          const updateData: any = {
-            precio: item.price,
-            estado: item.status,
-            categoria_id: item.category_id,
-            tipo_publicacion: item.listing_type_id,
-            ultima_sync: new Date().toISOString()
-          }
+          // Filtrar items válidos
+          const validItems = batchResults
+            .filter((r: any) => r.code === 200 && r.body)
+            .map((r: any) => r.body)
 
-          // Obtener comisiones desde /sites/MLA/listing_prices (igual que GAS)
-          if (item.category_id && item.listing_type_id && item.price > 0) {
-            const siteId = item.category_id.substring(0, 3) // MLA, MLB, etc
-            const feesUrl = `${ML_API_BASE}/sites/${siteId}/listing_prices?price=${item.price}&listing_type_id=${item.listing_type_id}&category_id=${item.category_id}`
+          // ============================================
+          // PARALELO: Obtener fees de todos los items a la vez
+          // ============================================
+          const feesPromises = validItems.map(async (item: any) => {
+            const updateData: any = {
+              id_publicacion: item.id,
+              precio: item.price,
+              estado: item.status,
+              categoria_id: item.category_id,
+              tipo_publicacion: item.listing_type_id,
+              ultima_sync: new Date().toISOString()
+            }
 
-            try {
-              const feesResponse = await fetch(feesUrl, {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
-              })
+            // Obtener comisiones si tenemos los datos necesarios
+            if (item.category_id && item.listing_type_id && item.price > 0) {
+              const siteId = item.category_id.substring(0, 3)
+              const feesUrl = `${ML_API_BASE}/sites/${siteId}/listing_prices?price=${item.price}&listing_type_id=${item.listing_type_id}&category_id=${item.category_id}`
 
-              if (feesResponse.ok) {
-                const feesData = await feesResponse.json()
+              try {
+                const feesResponse = await fetch(feesUrl, {
+                  headers: { 'Authorization': `Bearer ${accessToken}` }
+                })
 
-                if (feesData.sale_fee_details) {
-                  const cargoFijo = feesData.sale_fee_details.fixed_fee || 0
-                  const comisionTotal = feesData.sale_fee_amount || 0
-                  const comision = comisionTotal - cargoFijo
-                  const impuestos = feesData.taxes_amount || 0
+                if (feesResponse.ok) {
+                  const feesData = await feesResponse.json()
 
-                  updateData.cargo_fijo_ml = cargoFijo
-                  updateData.comision_ml = comision
-                  updateData.impuestos_estimados = impuestos
+                  if (feesData.sale_fee_details) {
+                    const cargoFijo = feesData.sale_fee_details.fixed_fee || 0
+                    const comisionTotal = feesData.sale_fee_amount || 0
+                    const comision = comisionTotal - cargoFijo
+                    const impuestos = feesData.taxes_amount || 0
 
-                  // Calcular neto estimado (precio - comision - cargo_fijo - impuestos)
-                  // Nota: costo_envio_ml no viene de este endpoint, se deja como está
-                  const costoEnvio = 0 // TODO: obtener de shipping si es necesario
-                  updateData.neto_estimado = item.price - comision - cargoFijo - costoEnvio - impuestos
+                    updateData.cargo_fijo_ml = cargoFijo
+                    updateData.comision_ml = comision
+                    updateData.impuestos_estimados = impuestos
+                    updateData.neto_estimado = item.price - comision - cargoFijo - impuestos
+                  }
                 }
+              } catch (feeError) {
+                // Continuar sin fees
               }
-            } catch (feeError) {
-              console.error(`Error obteniendo fees de ${itemId}:`, feeError)
-              // Continuamos sin las comisiones
+            }
+
+            return updateData
+          })
+
+          // Esperar todas las llamadas de fees en paralelo
+          const updatesData = await Promise.all(feesPromises)
+
+          // ============================================
+          // BATCH UPSERT: Actualizar todos en Supabase de una vez
+          // ============================================
+          if (updatesData.length > 0) {
+            const { error } = await supabase
+              .from('publicaciones_meli')
+              .upsert(updatesData, { onConflict: 'id_publicacion' })
+
+            if (!error) {
+              updated += updatesData.length
+            } else {
+              console.error('Error en batch upsert:', error)
             }
           }
 
-          // Actualizar en Supabase
-          const { error } = await supabase
-            .from('publicaciones_meli')
-            .update(updateData)
-            .eq('id_publicacion', item.id)
-
-          if (!error) updated++
-
-        } catch (itemError) {
-          console.error(`Error obteniendo precio de ${itemId}:`, itemError)
+        } catch (batchError) {
+          console.error('Error procesando batch de precios:', batchError)
         }
       }
 
