@@ -7,7 +7,7 @@
 // ============================================
 
 import { supabase } from '../config.js';
-import { mostrarNotificacion, confirmarAccion, formatearFecha, generarId } from '../utils.js';
+import { mostrarNotificacion, confirmarAccion, formatearFecha, fechaLocalISO, generarId } from '../utils.js';
 
 // Estado local del módulo
 let enviosCache = [];
@@ -381,7 +381,7 @@ export const moduloEnviosCreados = {
         document.getElementById('modal-titulo').textContent = `Editar Envío: ${idEnvio}`;
 
         const fechaColecta = envio.fecha_colecta
-            ? new Date(envio.fecha_colecta).toISOString().split('T')[0]
+            ? fechaLocalISO(new Date(envio.fecha_colecta))
             : '';
 
         document.getElementById('modal-contenido').innerHTML = `

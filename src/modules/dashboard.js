@@ -6,7 +6,7 @@
 // ============================================
 
 import { supabase } from '../config.js';
-import { mostrarNotificacion, formatearMoneda, formatearFecha, formatearHora, formatearPorcentaje, formatearNumero } from '../utils.js';
+import { mostrarNotificacion, formatearMoneda, formatearFecha, fechaLocalISO, formatearHora, formatearPorcentaje, formatearNumero } from '../utils.js';
 
 // Estado local del modulo
 let filtros = {
@@ -19,18 +19,6 @@ let ventasDiarias = [];
 let topProductos = [];
 let ultimaActualizacion = null;
 let chartInstance = null;
-
-// ============================================
-// HELPER: Obtener fecha local en formato YYYY-MM-DD
-// Evita el problema de toISOString() que convierte a UTC
-// (a las 22:00 ARG, UTC ya es el día siguiente)
-// ============================================
-function fechaLocalISO(date = new Date()) {
-    const año = date.getFullYear();
-    const mes = String(date.getMonth() + 1).padStart(2, '0');
-    const dia = String(date.getDate()).padStart(2, '0');
-    return `${año}-${mes}-${dia}`;
-}
 
 export const moduloDashboard = {
 

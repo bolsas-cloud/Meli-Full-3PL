@@ -68,6 +68,19 @@ export function formatearFecha(fechaString) {
 }
 
 /**
+ * Convierte una fecha a formato YYYY-MM-DD usando timezone local
+ * Evita el problema de UTC que causa +1 día en horarios nocturnos
+ * @param {Date} date - Fecha a convertir (default: ahora)
+ * @returns {string} - Fecha en formato YYYY-MM-DD
+ */
+export function fechaLocalISO(date = new Date()) {
+    const año = date.getFullYear();
+    const mes = String(date.getMonth() + 1).padStart(2, '0');
+    const dia = String(date.getDate()).padStart(2, '0');
+    return `${año}-${mes}-${dia}`;
+}
+
+/**
  * Formatea una fecha ISO a HH:MM
  * @param {string} fechaString
  * @returns {string}
