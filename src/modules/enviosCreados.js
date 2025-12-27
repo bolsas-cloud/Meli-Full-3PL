@@ -13,6 +13,17 @@ import { mostrarNotificacion, confirmarAccion, formatearFecha, fechaLocalISO, ge
 let enviosCache = [];
 let envioSeleccionado = null;
 
+// Helper para parsear fechas como local (evita problema UTC)
+function parsearFechaLocal(fechaStr) {
+    if (!fechaStr) return null;
+    // Si es formato YYYY-MM-DD, parsearlo como fecha local
+    if (typeof fechaStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaStr)) {
+        const [año, mes, dia] = fechaStr.split('-').map(Number);
+        return new Date(año, mes - 1, dia);
+    }
+    return new Date(fechaStr);
+}
+
 export const moduloEnviosCreados = {
 
     // ============================================
@@ -204,7 +215,7 @@ export const moduloEnviosCreados = {
 
         listaDiv.innerHTML = envios.map(envio => {
             const fechaCreacion = new Date(envio.fecha_creacion);
-            const fechaColecta = envio.fecha_colecta ? new Date(envio.fecha_colecta) : null;
+            const fechaColecta = parsearFechaLocal(envio.fecha_colecta);
 
             // Colores según estado
             const estadoColores = {
@@ -381,7 +392,7 @@ export const moduloEnviosCreados = {
         document.getElementById('modal-titulo').textContent = `Editar Envío: ${idEnvio}`;
 
         const fechaColecta = envio.fecha_colecta
-            ? fechaLocalISO(new Date(envio.fecha_colecta))
+            ? fechaLocalISO(parsearFechaLocal(envio.fecha_colecta))
             : '';
 
         document.getElementById('modal-contenido').innerHTML = `
@@ -636,7 +647,7 @@ export const moduloEnviosCreados = {
             const doc = new jsPDF();
 
             const fechaCreacion = new Date(envio.fecha_creacion);
-            const fechaColecta = envio.fecha_colecta ? new Date(envio.fecha_colecta) : null;
+            const fechaColecta = parsearFechaLocal(envio.fecha_colecta);
 
             // Header
             doc.setFontSize(20);
