@@ -13,6 +13,10 @@ import { mostrarNotificacion, confirmarAccion, formatearFecha, fechaLocalISO, ge
 let enviosCache = [];
 let envioSeleccionado = null;
 
+// Estado para modal de agregar producto
+let publicacionesDisponibles = [];
+let publicacionSeleccionada = null;
+
 // Helper para parsear fechas como local (evita problema UTC)
 function parsearFechaLocal(fechaStr) {
     if (!fechaStr) return null;
@@ -97,6 +101,89 @@ export const moduloEnviosCreados = {
                                     class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-2">
                                 <i class="fas fa-save"></i>
                                 Guardar Cambios
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal de agregar producto -->
+            <div id="modal-agregar-producto" class="fixed inset-0 z-[60] hidden" aria-modal="true">
+                <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="moduloEnviosCreados.cerrarModalAgregarProducto()"></div>
+                <div class="fixed inset-0 z-10 overflow-y-auto p-4 flex items-center justify-center">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg min-h-[420px] overflow-hidden animate-fade-in flex flex-col">
+                        <div class="bg-brand text-white px-6 py-4 flex items-center justify-between">
+                            <h3 class="font-bold text-lg">
+                                <i class="fas fa-plus-circle mr-2"></i>
+                                Agregar Producto
+                            </h3>
+                            <button onclick="moduloEnviosCreados.cerrarModalAgregarProducto()" class="text-white/80 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div class="p-6 flex-1">
+                            <!-- Buscador -->
+                            <div class="relative">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Buscar publicación
+                                </label>
+                                <div class="relative">
+                                    <input type="text"
+                                           id="input-buscar-publicacion"
+                                           class="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-3 focus:ring-2 focus:ring-brand focus:border-transparent"
+                                           placeholder="Escribí SKU, título o ID..."
+                                           autocomplete="off"
+                                           oninput="moduloEnviosCreados.filtrarPublicacionesBusqueda(this.value)">
+                                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                                </div>
+
+                                <!-- Dropdown de resultados -->
+                                <div id="dropdown-publicaciones"
+                                     class="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto hidden">
+                                    <!-- Se llena dinámicamente -->
+                                </div>
+                            </div>
+
+                            <!-- Producto seleccionado -->
+                            <div id="producto-seleccionado-preview" class="mt-4 hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Producto seleccionado
+                                </label>
+                                <div class="bg-brand-light border border-brand/30 rounded-lg p-3 flex items-center justify-between">
+                                    <div class="flex-1 min-w-0">
+                                        <p id="preview-sku" class="font-bold text-brand-text"></p>
+                                        <p id="preview-titulo" class="text-sm text-gray-600 truncate"></p>
+                                    </div>
+                                    <button onclick="moduloEnviosCreados.limpiarSeleccionProducto()"
+                                            class="ml-2 text-gray-400 hover:text-red-500">
+                                        <i class="fas fa-times-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Cantidad -->
+                            <div id="cantidad-container" class="mt-4 hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Cantidad a enviar
+                                </label>
+                                <input type="number"
+                                       id="input-cantidad-agregar"
+                                       class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-brand focus:border-transparent"
+                                       value="1"
+                                       min="1">
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+                            <button onclick="moduloEnviosCreados.cerrarModalAgregarProducto()"
+                                    class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                                Cancelar
+                            </button>
+                            <button onclick="moduloEnviosCreados.confirmarAgregarProducto()"
+                                    id="btn-confirmar-agregar"
+                                    disabled
+                                    class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-plus"></i>
+                                Agregar
                             </button>
                         </div>
                     </div>
@@ -420,16 +507,33 @@ export const moduloEnviosCreados = {
                 <!-- Lista de productos -->
                 <div>
                     <div class="flex justify-between items-center mb-2">
-                        <label class="block text-sm font-medium text-gray-700">Productos del Envío</label>
+                        <label class="block text-sm font-medium text-gray-700">
+                            Productos del Envío
+                            <span class="text-gray-400 font-normal">(${envio.productos.length})</span>
+                        </label>
                         <button onclick="moduloEnviosCreados.agregarProducto()"
                                 class="text-sm text-brand hover:text-brand-dark font-medium">
                             <i class="fas fa-plus mr-1"></i>Agregar
                         </button>
                     </div>
 
+                    <!-- Buscador de productos del envío -->
+                    <div class="relative mb-2">
+                        <input type="text"
+                               id="input-filtrar-productos-envio"
+                               class="w-full border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent"
+                               placeholder="Filtrar por SKU o título..."
+                               autocomplete="off"
+                               oninput="moduloEnviosCreados.filtrarProductosEnvio(this.value)">
+                        <i class="fas fa-filter absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                    </div>
+
                     <div id="lista-productos-editar" class="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-64 overflow-y-auto">
                         ${envio.productos.map((p, idx) => `
-                            <div class="flex items-center justify-between p-3 hover:bg-gray-50" data-idx="${idx}">
+                            <div class="flex items-center justify-between p-3 hover:bg-gray-50 producto-item-envio"
+                                 data-idx="${idx}"
+                                 data-sku="${(p.sku || '').toLowerCase()}"
+                                 data-titulo="${(p.titulo || '').toLowerCase()}">
                                 <div class="flex-1 min-w-0">
                                     <p class="font-medium text-gray-800 truncate">${p.sku}</p>
                                     <p class="text-xs text-gray-500 truncate">${p.titulo || '-'}</p>
@@ -446,6 +550,7 @@ export const moduloEnviosCreados = {
                             </div>
                         `).join('')}
                     </div>
+                    <p id="contador-filtro-productos" class="text-xs text-gray-400 mt-1 hidden"></p>
                 </div>
             </div>
         `;
@@ -545,32 +650,222 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // PRODUCTOS: Agregar nuevo
+    // PRODUCTOS: Filtrar lista en modal de edición
+    // ============================================
+    filtrarProductosEnvio: (texto) => {
+        const busqueda = texto.trim().toLowerCase();
+        const items = document.querySelectorAll('.producto-item-envio');
+        const contador = document.getElementById('contador-filtro-productos');
+        let visibles = 0;
+
+        items.forEach(item => {
+            const sku = item.dataset.sku || '';
+            const titulo = item.dataset.titulo || '';
+
+            if (busqueda === '' || sku.includes(busqueda) || titulo.includes(busqueda)) {
+                item.classList.remove('hidden');
+                visibles++;
+            } else {
+                item.classList.add('hidden');
+            }
+        });
+
+        // Mostrar contador si hay filtro activo
+        if (busqueda !== '') {
+            contador.textContent = `Mostrando ${visibles} de ${items.length} productos`;
+            contador.classList.remove('hidden');
+        } else {
+            contador.classList.add('hidden');
+        }
+    },
+
+    // ============================================
+    // PRODUCTOS: Agregar nuevo (abre modal)
     // ============================================
     agregarProducto: async () => {
-        // Mostrar input para SKU
-        const sku = prompt('Ingresa el SKU del producto a agregar:');
-        if (!sku) return;
+        await moduloEnviosCreados.abrirModalAgregarProducto();
+    },
 
-        // Buscar el producto
-        const { data: prod } = await supabase
-            .from('publicaciones_meli')
-            .select('sku, titulo, id_publicacion')
-            .eq('sku', sku.trim().toUpperCase())
-            .single();
+    // ============================================
+    // MODAL AGREGAR: Abrir y cargar publicaciones
+    // ============================================
+    abrirModalAgregarProducto: async () => {
+        if (!envioSeleccionado) return;
 
-        if (prod) {
-            envioSeleccionado.productos.push({
-                sku: prod.sku,
-                titulo: prod.titulo,
-                id_publicacion: prod.id_publicacion,
-                cantidad_enviada: 1
-            });
-            // Re-renderizar
-            moduloEnviosCreados.editarEnvio(envioSeleccionado.id_envio);
-        } else {
-            mostrarNotificacion('SKU no encontrado', 'warning');
+        // Resetear estado
+        publicacionSeleccionada = null;
+        document.getElementById('input-buscar-publicacion').value = '';
+        document.getElementById('dropdown-publicaciones').classList.add('hidden');
+        document.getElementById('producto-seleccionado-preview').classList.add('hidden');
+        document.getElementById('cantidad-container').classList.add('hidden');
+        document.getElementById('btn-confirmar-agregar').disabled = true;
+        document.getElementById('input-cantidad-agregar').value = 1;
+
+        // Mostrar modal
+        document.getElementById('modal-agregar-producto').classList.remove('hidden');
+
+        // Cargar publicaciones disponibles
+        await moduloEnviosCreados.cargarPublicacionesDisponibles();
+
+        // Enfocar input
+        setTimeout(() => {
+            document.getElementById('input-buscar-publicacion')?.focus();
+        }, 100);
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Cargar publicaciones (excluyendo las del envío)
+    // ============================================
+    cargarPublicacionesDisponibles: async () => {
+        try {
+            // Obtener SKUs ya incluidos en el envío
+            const skusEnEnvio = envioSeleccionado.productos.map(p => p.sku?.toUpperCase()).filter(Boolean);
+
+            // Cargar todas las publicaciones
+            const { data: pubs, error } = await supabase
+                .from('publicaciones_meli')
+                .select('sku, titulo, id_publicacion, id_inventario, stock_full')
+                .order('sku', { ascending: true });
+
+            if (error) throw error;
+
+            // Filtrar excluyendo las que ya están en el envío
+            publicacionesDisponibles = (pubs || []).filter(p =>
+                !skusEnEnvio.includes(p.sku?.toUpperCase())
+            );
+
+        } catch (error) {
+            console.error('Error cargando publicaciones:', error);
+            mostrarNotificacion('Error al cargar publicaciones', 'error');
+            publicacionesDisponibles = [];
         }
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Filtrar publicaciones en dropdown
+    // ============================================
+    filtrarPublicacionesBusqueda: (texto) => {
+        const dropdown = document.getElementById('dropdown-publicaciones');
+        const busqueda = texto.trim().toLowerCase();
+
+        if (busqueda.length < 2) {
+            dropdown.classList.add('hidden');
+            return;
+        }
+
+        // Filtrar por SKU, título o ID
+        const resultados = publicacionesDisponibles.filter(p => {
+            const sku = (p.sku || '').toLowerCase();
+            const titulo = (p.titulo || '').toLowerCase();
+            const idPub = (p.id_publicacion || '').toLowerCase();
+            const idInv = (p.id_inventario || '').toLowerCase();
+
+            return sku.includes(busqueda) ||
+                   titulo.includes(busqueda) ||
+                   idPub.includes(busqueda) ||
+                   idInv.includes(busqueda);
+        }).slice(0, 10); // Limitar a 10 resultados
+
+        if (resultados.length === 0) {
+            dropdown.innerHTML = `
+                <div class="px-4 py-3 text-sm text-gray-500 text-center">
+                    <i class="fas fa-search mr-1"></i>
+                    No se encontraron resultados
+                </div>
+            `;
+        } else {
+            dropdown.innerHTML = resultados.map(p => `
+                <div class="px-4 py-3 hover:bg-brand-light cursor-pointer transition-colors border-b border-gray-100 last:border-0"
+                     onclick="moduloEnviosCreados.seleccionarPublicacion('${p.sku}')">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-medium text-gray-800">${p.sku || '-'}</p>
+                            <p class="text-sm text-gray-500 truncate">${p.titulo || '-'}</p>
+                        </div>
+                        <span class="ml-2 text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">
+                            Stock: ${p.stock_full || 0}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        dropdown.classList.remove('hidden');
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Seleccionar publicación
+    // ============================================
+    seleccionarPublicacion: (sku) => {
+        const pub = publicacionesDisponibles.find(p => p.sku === sku);
+        if (!pub) return;
+
+        publicacionSeleccionada = pub;
+
+        // Ocultar dropdown
+        document.getElementById('dropdown-publicaciones').classList.add('hidden');
+        document.getElementById('input-buscar-publicacion').value = '';
+
+        // Mostrar preview del producto seleccionado
+        document.getElementById('preview-sku').textContent = pub.sku;
+        document.getElementById('preview-titulo').textContent = pub.titulo || '-';
+        document.getElementById('producto-seleccionado-preview').classList.remove('hidden');
+
+        // Mostrar input de cantidad
+        document.getElementById('cantidad-container').classList.remove('hidden');
+
+        // Habilitar botón de agregar
+        document.getElementById('btn-confirmar-agregar').disabled = false;
+
+        // Enfocar input de cantidad
+        document.getElementById('input-cantidad-agregar').focus();
+        document.getElementById('input-cantidad-agregar').select();
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Limpiar selección
+    // ============================================
+    limpiarSeleccionProducto: () => {
+        publicacionSeleccionada = null;
+
+        document.getElementById('producto-seleccionado-preview').classList.add('hidden');
+        document.getElementById('cantidad-container').classList.add('hidden');
+        document.getElementById('btn-confirmar-agregar').disabled = true;
+        document.getElementById('input-buscar-publicacion').value = '';
+        document.getElementById('input-buscar-publicacion').focus();
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Confirmar y agregar producto
+    // ============================================
+    confirmarAgregarProducto: () => {
+        if (!publicacionSeleccionada || !envioSeleccionado) return;
+
+        const cantidad = parseInt(document.getElementById('input-cantidad-agregar').value) || 1;
+
+        // Agregar al envío
+        envioSeleccionado.productos.push({
+            sku: publicacionSeleccionada.sku,
+            titulo: publicacionSeleccionada.titulo,
+            id_publicacion: publicacionSeleccionada.id_publicacion,
+            cantidad_enviada: cantidad
+        });
+
+        mostrarNotificacion(`${publicacionSeleccionada.sku} agregado al envío`, 'success');
+
+        // Cerrar modal de agregar
+        moduloEnviosCreados.cerrarModalAgregarProducto();
+
+        // Re-renderizar el modal de edición
+        moduloEnviosCreados.editarEnvio(envioSeleccionado.id_envio);
+    },
+
+    // ============================================
+    // MODAL AGREGAR: Cerrar
+    // ============================================
+    cerrarModalAgregarProducto: () => {
+        document.getElementById('modal-agregar-producto').classList.add('hidden');
+        publicacionSeleccionada = null;
     },
 
     // ============================================
