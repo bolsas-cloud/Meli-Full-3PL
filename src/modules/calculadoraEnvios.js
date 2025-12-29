@@ -145,18 +145,18 @@ export const moduloCalculadora = {
                         <table class="min-w-full divide-y divide-gray-100">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">
                                         <input type="checkbox" id="check-all" onchange="moduloCalculadora.toggleAll(this)">
                                     </th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ventas/Día</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">En Tránsito</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" title="Stock de Seguridad">Stock Seg.</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cobertura</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">A ENVIAR</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Riesgo</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
+                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">V/Día</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Stock</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Tráns</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap" title="Stock de Seguridad">Seg</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Cob</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Enviar</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Riesgo</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-sugerencias" class="divide-y divide-gray-100 text-sm">
@@ -504,32 +504,32 @@ export const moduloCalculadora = {
             const key = s.id_publicacion || s.sku;
             return `
             <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(key) ? 'bg-brand-light' : ''}">
-                <td class="px-4 py-3">
+                <td class="px-2 py-3">
                     <input type="checkbox"
                            ${productosSeleccionados.has(key) ? 'checked' : ''}
                            onchange="moduloCalculadora.toggleSeleccion('${key}')">
                 </td>
-                <td class="px-4 py-3 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
-                <td class="px-4 py-3">
-                    <div class="max-w-xs truncate" title="${s.titulo}">${s.titulo || '-'}</div>
+                <td class="px-2 py-3 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
+                <td class="px-3 py-3">
+                    <p class="truncate text-sm" title="${s.titulo}">${s.titulo || '-'}</p>
                 </td>
-                <td class="px-4 py-3 text-right font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
-                <td class="px-4 py-3 text-right">${s.stock_actual_full || 0}</td>
-                <td class="px-4 py-3 text-right text-gray-500">${s.stock_en_transito || 0}</td>
-                <td class="px-4 py-3 text-right">${s.stock_seguridad || 0}</td>
-                <td class="px-4 py-3 text-right">
+                <td class="px-2 py-3 text-right text-sm font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
+                <td class="px-2 py-3 text-right text-sm">${s.stock_actual_full || 0}</td>
+                <td class="px-2 py-3 text-right text-sm text-gray-500">${s.stock_en_transito || 0}</td>
+                <td class="px-2 py-3 text-right text-sm">${s.stock_seguridad || 0}</td>
+                <td class="px-2 py-3 text-right text-sm">
                     <span class="${(s.dias_cobertura || 0) < 7 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
                         ${s.dias_cobertura === Infinity ? '∞' : (s.dias_cobertura || 0).toFixed(1)}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-right">
+                <td class="px-2 py-3 text-right">
                     <input type="number"
                            value="${s.cantidad_a_enviar || 0}"
                            min="0"
-                           class="w-20 text-right border border-gray-300 rounded px-2 py-1"
+                           class="w-16 text-right text-sm border border-gray-300 rounded px-1 py-1"
                            onchange="moduloCalculadora.actualizarCantidad('${key}', this.value)">
                 </td>
-                <td class="px-4 py-3 text-center">
+                <td class="px-2 py-3 text-center">
                     <span class="px-2 py-1 rounded-full text-xs font-bold ${colorRiesgo(s.nivel_riesgo)}">
                         ${s.nivel_riesgo || 'N/A'}
                     </span>

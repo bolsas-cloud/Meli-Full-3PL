@@ -937,95 +937,130 @@ export const moduloEnviosCreados = {
                 }
             }
 
-            // Usar jsPDF (ya incluido en index.html)
+            // Usar jsPDF
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
 
             const fechaCreacion = new Date(envio.fecha_creacion);
             const fechaColecta = parsearFechaLocal(envio.fecha_colecta);
+            const totalBultos = envio.productos.reduce((sum, p) => sum + (p.cantidad_enviada || 0), 0);
 
-            // Header
-            doc.setFontSize(20);
-            doc.setTextColor(78, 171, 135); // Color brand
-            doc.text('Envío a Full', 105, 20, { align: 'center' });
+            // === HEADER MINIMALISTA ===
+            doc.setFontSize(18);
+            doc.setTextColor(50, 50, 50);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Envío a Full', 14, 20);
 
-            // Info del envío
-            doc.setFontSize(12);
-            doc.setTextColor(0, 0, 0);
-            doc.text(`ID: ${envio.id_envio}`, 14, 35);
-            doc.text(`Estado: ${envio.estado}`, 130, 35);
+            // ID del envío destacado
+            doc.setFontSize(11);
+            doc.setTextColor(78, 171, 135);
+            doc.text(envio.id_envio, 14, 28);
 
+            // Info compacta en una línea
+            doc.setFontSize(9);
+            doc.setTextColor(120, 120, 120);
+            doc.setFont('helvetica', 'normal');
+            const infoLine = [
+                `Creado: ${fechaCreacion.toLocaleDateString('es-AR')}`,
+                fechaColecta ? `Colecta: ${fechaColecta.toLocaleDateString('es-AR')}` : null,
+                envio.id_envio_ml ? `ML: ${envio.id_envio_ml}` : null
+            ].filter(Boolean).join('  |  ');
+            doc.text(infoLine, 14, 35);
+
+            // Resumen en header derecho
             doc.setFontSize(10);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`Fecha Creación: ${fechaCreacion.toLocaleDateString('es-AR')}`, 14, 45);
-            doc.text(`Fecha Colecta: ${fechaColecta ? fechaColecta.toLocaleDateString('es-AR') : '-'}`, 130, 45);
+            doc.setTextColor(50, 50, 50);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`${envio.productos.length} productos`, 196, 20, { align: 'right' });
+            doc.text(`${totalBultos} unidades`, 196, 27, { align: 'right' });
 
-            if (envio.id_envio_ml) {
-                doc.text(`ID ML: ${envio.id_envio_ml}`, 14, 52);
-            }
+            // Estado con color
+            const estadoColor = {
+                'Borrador': [150, 150, 150],
+                'En Preparación': [234, 179, 8],
+                'Despachado': [59, 130, 246],
+                'Recibido': [34, 197, 94]
+            };
+            doc.setTextColor(...(estadoColor[envio.estado] || [100, 100, 100]));
+            doc.setFontSize(9);
+            doc.text(envio.estado.toUpperCase(), 196, 34, { align: 'right' });
 
-            // Línea separadora
-            doc.setDrawColor(200, 200, 200);
-            doc.line(14, 58, 196, 58);
+            // Línea separadora sutil
+            doc.setDrawColor(230, 230, 230);
+            doc.setLineWidth(0.5);
+            doc.line(14, 42, 196, 42);
 
-            // Tabla de productos usando autoTable con inventory_id
+            // === TABLA DE PRODUCTOS ===
             const productosData = envio.productos.map((p, idx) => [
                 idx + 1,
                 p.sku || '-',
                 inventoryMap[p.sku] || '-',
-                (p.titulo || '-').substring(0, 50),
+                p.titulo || '-',
                 p.cantidad_enviada || 0
             ]);
 
             doc.autoTable({
-                startY: 65,
-                head: [['#', 'SKU', 'Inventory ID', 'Producto', 'Cant.']],
+                startY: 48,
+                head: [['#', 'SKU', 'Inv ID', 'Producto', 'Cant']],
                 body: productosData,
-                theme: 'striped',
+                theme: 'plain',
                 headStyles: {
-                    fillColor: [78, 171, 135],
-                    textColor: 255,
+                    fillColor: [248, 250, 252],
+                    textColor: [80, 80, 80],
                     fontStyle: 'bold',
-                    fontSize: 9
+                    fontSize: 8,
+                    cellPadding: 4,
+                    lineWidth: 0,
+                    lineColor: [230, 230, 230]
+                },
+                bodyStyles: {
+                    fontSize: 8,
+                    cellPadding: 3,
+                    lineColor: [240, 240, 240],
+                    lineWidth: 0.1
+                },
+                alternateRowStyles: {
+                    fillColor: [252, 252, 253]
                 },
                 columnStyles: {
-                    0: { cellWidth: 12, halign: 'center' },
-                    1: { cellWidth: 36 },
-                    2: { cellWidth: 24, fontSize: 8 },
+                    0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
+                    1: { cellWidth: 34, fontSize: 7, font: 'courier' },
+                    2: { cellWidth: 22, fontSize: 7, textColor: [100, 100, 100] },
                     3: { cellWidth: 104 },
-                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }
+                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold', textColor: [50, 50, 50] }
                 },
                 styles: {
-                    fontSize: 9,
-                    cellPadding: 2.5
+                    overflow: 'linebreak',
+                    cellPadding: 3
                 },
-                margin: { left: 14, right: 14 }
+                margin: { left: 14, right: 14 },
+                tableLineColor: [230, 230, 230],
+                tableLineWidth: 0.1
             });
 
-            // Totales
-            const totalBultos = envio.productos.reduce((sum, p) => sum + (p.cantidad_enviada || 0), 0);
-            const finalY = doc.lastAutoTable.finalY + 10;
-
-            doc.setFontSize(12);
-            doc.setTextColor(0, 0, 0);
-            doc.text(`Total SKUs: ${envio.productos.length}`, 14, finalY);
-            doc.text(`Total Bultos: ${totalBultos}`, 130, finalY);
+            // === FOOTER ===
+            const finalY = doc.lastAutoTable.finalY + 8;
 
             // Notas si existen
             if (envio.notas) {
-                doc.setFontSize(9);
+                doc.setFontSize(8);
                 doc.setTextColor(100, 100, 100);
-                doc.text(`Notas: ${envio.notas}`, 14, finalY + 10);
+                doc.setFont('helvetica', 'italic');
+                doc.text(`Notas: ${envio.notas}`, 14, finalY);
             }
 
-            // Footer
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 105, 285, { align: 'center' });
+            // Timestamp
+            doc.setFontSize(7);
+            doc.setTextColor(180, 180, 180);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 105, 290, { align: 'center' });
 
-            // Descargar
-            doc.save(`Envio_${envio.id_envio}.pdf`);
-            mostrarNotificacion('PDF generado correctamente', 'success');
+            // === ABRIR EN NUEVA VENTANA ===
+            const pdfBlob = doc.output('blob');
+            const pdfUrl = URL.createObjectURL(pdfBlob);
+            window.open(pdfUrl, '_blank');
+
+            mostrarNotificacion('PDF generado', 'success');
 
         } catch (error) {
             console.error('Error generando PDF:', error);
