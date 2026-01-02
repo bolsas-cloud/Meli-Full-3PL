@@ -582,10 +582,11 @@ export const moduloEnviosCreados = {
             const notas = document.getElementById('edit-notas').value.trim();
 
             // Actualizar registro del envío
+            // Guardar fecha con hora al mediodía para evitar problemas de timezone UTC
             const { error } = await supabase
                 .from('registro_envios_full')
                 .update({
-                    fecha_colecta: fechaColecta || null,
+                    fecha_colecta: fechaColecta ? `${fechaColecta}T12:00:00` : null,
                     id_envio_ml: idMl || null,
                     notas: notas || null
                 })
@@ -1074,7 +1075,9 @@ export const moduloEnviosCreados = {
     preparacionActiva: null,
     productosPreparacion: [],
     ultimoSkuFoco: null,
-    cambiosPendientes: false, // Trackea si hay cambios desde el último guardado
+    autoSaveTimeout: null, // Timer para debounce del auto-guardado
+    realtimeChannel: null, // Canal de Supabase Realtime para multi-usuario
+    realtimeDebounce: null, // Timer para debounce de cambios Realtime
 
     iniciarPreparacion: async (idEnvio) => {
         const envio = enviosCache.find(e => e.id_envio === idEnvio);
@@ -1142,17 +1145,20 @@ export const moduloEnviosCreados = {
                                 <i class="fas fa-box-open text-yellow-500 mr-2"></i>
                                 Preparando: ${envio.id_envio}
                             </h3>
-                            <p class="text-sm text-gray-500">Escanea los productos o usa los botones +/-</p>
+                            <p class="text-sm text-gray-500">
+                                Escanea los productos o usa los botones +/-
+                                <span id="indicador-guardado" class="ml-2 text-green-600 hidden">
+                                    <i class="fas fa-check-circle"></i> Guardado
+                                </span>
+                                <span id="indicador-guardando" class="ml-2 text-blue-500 hidden">
+                                    <i class="fas fa-circle-notch fa-spin"></i> Guardando...
+                                </span>
+                            </p>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="moduloEnviosCreados.cancelarPreparacion()"
+                            <button onclick="moduloEnviosCreados.volverDePreparacion()"
                                     class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
-                                <i class="fas fa-times mr-1"></i>Cancelar
-                            </button>
-                            <button id="btn-guardar-salir"
-                                    onclick="moduloEnviosCreados.accionBotonGuardarSalir()"
-                                    class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                                <i class="fas fa-save mr-1"></i>Guardar y Continuar
+                                <i class="fas fa-arrow-left mr-1"></i>Volver
                             </button>
                             <button onclick="moduloEnviosCreados.finalizarPreparacion()"
                                     class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors">
@@ -1217,13 +1223,157 @@ export const moduloEnviosCreados = {
                     </div>
                 </div>
             </div>
+
+            <!-- Modal de confirmación para finalizar con incompletos -->
+            <div id="modal-finalizar-incompletos" class="fixed inset-0 z-50 hidden" aria-modal="true">
+                <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm"></div>
+                <div class="fixed inset-0 z-10 overflow-y-auto p-4 flex items-center justify-center">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden animate-fade-in">
+                        <div class="bg-yellow-500 text-white px-6 py-4 flex items-center gap-3">
+                            <i class="fas fa-exclamation-triangle text-2xl"></i>
+                            <div>
+                                <h3 class="font-bold text-lg">Productos Incompletos</h3>
+                                <p class="text-yellow-100 text-sm">Revisá las cantidades antes de finalizar</p>
+                            </div>
+                        </div>
+                        <div class="p-6 overflow-y-auto max-h-[50vh]">
+                            <p class="text-sm text-gray-600 mb-4">
+                                Los siguientes productos tienen menos unidades escaneadas que las planificadas.
+                                Podés ajustar la cantidad final o continuar con lo escaneado:
+                            </p>
+                            <div id="lista-incompletos" class="space-y-3">
+                                <!-- Se llena dinámicamente -->
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+                            <button onclick="moduloEnviosCreados.cerrarModalIncompletos()"
+                                    class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                                Cancelar
+                            </button>
+                            <button onclick="moduloEnviosCreados.confirmarFinalizarConIncompletos()"
+                                    class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors flex items-center gap-2">
+                                <i class="fas fa-check"></i>
+                                Finalizar con estas cantidades
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
 
-        // Enfocar input y actualizar estado del botón
+        // Enfocar input
         setTimeout(() => {
             document.getElementById('input-escaner')?.focus();
-            moduloEnviosCreados.actualizarBotonGuardar();
         }, 100);
+
+        // Suscribirse a cambios en tiempo real para multi-usuario
+        moduloEnviosCreados.suscribirseRealtime(envio.id_envio);
+    },
+
+    // ============================================
+    // REALTIME: Suscribirse a cambios de otros usuarios
+    // ============================================
+    suscribirseRealtime: (idEnvio) => {
+        // Desuscribirse del canal anterior si existe
+        if (moduloEnviosCreados.realtimeChannel) {
+            supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+        }
+
+        // Crear nuevo canal para este envío
+        moduloEnviosCreados.realtimeChannel = supabase
+            .channel(`preparacion-${idEnvio}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // INSERT, UPDATE, DELETE
+                    schema: 'public',
+                    table: 'preparacion_en_curso',
+                    filter: `id_envio=eq.${idEnvio}`
+                },
+                (payload) => {
+                    console.log('[Realtime] Cambio recibido:', payload);
+                    moduloEnviosCreados.procesarCambioRealtime(payload);
+                }
+            )
+            .subscribe((status) => {
+                console.log('[Realtime] Estado suscripción:', status);
+            });
+    },
+
+    // ============================================
+    // REALTIME: Procesar cambio de otro usuario
+    // ============================================
+    procesarCambioRealtime: async (payload) => {
+        // Ignorar si no hay preparación activa
+        if (!moduloEnviosCreados.preparacionActiva) return;
+
+        // Debounce para evitar múltiples recargas
+        if (moduloEnviosCreados.realtimeDebounce) {
+            clearTimeout(moduloEnviosCreados.realtimeDebounce);
+        }
+
+        moduloEnviosCreados.realtimeDebounce = setTimeout(async () => {
+            try {
+                // Recargar progreso desde la base de datos
+                const progresoActualizado = await moduloEnviosCreados.cargarProgresoGuardado(
+                    moduloEnviosCreados.preparacionActiva.id_envio
+                );
+
+                if (progresoActualizado.length > 0) {
+                    // Actualizar cantidades escaneadas desde el progreso
+                    const progresoMap = {};
+                    progresoActualizado.forEach(p => {
+                        progresoMap[p.sku] = p.cantidad_escaneada || 0;
+                    });
+
+                    // Verificar si hay cambios reales antes de actualizar UI
+                    let hayCambios = false;
+                    moduloEnviosCreados.productosPreparacion.forEach(p => {
+                        const nuevaCantidad = progresoMap[p.sku] ?? p.cantidad_escaneada;
+                        if (p.cantidad_escaneada !== nuevaCantidad) {
+                            hayCambios = true;
+                            p.cantidad_escaneada = nuevaCantidad;
+                        }
+                    });
+
+                    if (hayCambios) {
+                        // Mostrar indicador de sincronización
+                        mostrarNotificacion('Cambios sincronizados de otro usuario', 'info');
+
+                        // Actualizar UI
+                        document.getElementById('tabla-preparacion').innerHTML =
+                            moduloEnviosCreados.renderFilasPreparacion();
+
+                        // Actualizar resumen
+                        const completados = moduloEnviosCreados.productosPreparacion.filter(
+                            p => (p.cantidad_escaneada || 0) >= (p.cantidad_enviada || 0)
+                        ).length;
+                        const totalEscaneados = moduloEnviosCreados.productosPreparacion.reduce(
+                            (sum, p) => sum + (p.cantidad_escaneada || 0), 0
+                        );
+                        const totalRequeridos = moduloEnviosCreados.productosPreparacion.reduce(
+                            (sum, p) => sum + (p.cantidad_enviada || 0), 0
+                        );
+
+                        document.getElementById('resumen-completados').textContent = completados;
+                        document.getElementById('resumen-bultos').textContent =
+                            `${totalEscaneados} / ${totalRequeridos} bultos`;
+
+                        // Actualizar foco si hay producto seleccionado
+                        if (moduloEnviosCreados.ultimoSkuFoco) {
+                            const prod = moduloEnviosCreados.productosPreparacion.find(
+                                p => p.sku === moduloEnviosCreados.ultimoSkuFoco
+                            );
+                            if (prod) {
+                                moduloEnviosCreados.actualizarFoco(prod);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('[Realtime] Error procesando cambio:', error);
+            }
+        }, 300); // Debounce de 300ms
     },
 
     renderFilasPreparacion: () => {
@@ -1279,9 +1429,8 @@ export const moduloEnviosCreados = {
         prod.cantidad_escaneada = (prod.cantidad_escaneada || 0) + 1;
         moduloEnviosCreados.ultimoSkuFoco = prod.sku;
 
-        // Marcar que hay cambios pendientes
-        moduloEnviosCreados.cambiosPendientes = true;
-        moduloEnviosCreados.actualizarBotonGuardar();
+        // Auto-guardar con debounce
+        moduloEnviosCreados.programarAutoGuardado();
 
         moduloEnviosCreados.actualizarUIPreparacion(idx);
         document.getElementById('input-escaner').value = '';
@@ -1309,9 +1458,8 @@ export const moduloEnviosCreados = {
         const prod = moduloEnviosCreados.productosPreparacion[idx];
         prod.cantidad_escaneada = Math.max(0, (prod.cantidad_escaneada || 0) + delta);
 
-        // Marcar que hay cambios pendientes
-        moduloEnviosCreados.cambiosPendientes = true;
-        moduloEnviosCreados.actualizarBotonGuardar();
+        // Auto-guardar con debounce
+        moduloEnviosCreados.programarAutoGuardado();
 
         moduloEnviosCreados.actualizarUIPreparacion(idx);
     },
@@ -1356,9 +1504,30 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // GUARDAR PROGRESO: Guarda en preparacion_en_curso para continuar después
+    // AUTO-GUARDADO: Programar guardado con debounce (500ms)
     // ============================================
-    guardarProgresoPreparacion: async () => {
+    programarAutoGuardado: () => {
+        // Cancelar guardado anterior si existe
+        if (moduloEnviosCreados.autoSaveTimeout) {
+            clearTimeout(moduloEnviosCreados.autoSaveTimeout);
+        }
+
+        // Mostrar indicador "Guardando..."
+        const indicadorGuardando = document.getElementById('indicador-guardando');
+        const indicadorGuardado = document.getElementById('indicador-guardado');
+        if (indicadorGuardando) indicadorGuardando.classList.remove('hidden');
+        if (indicadorGuardado) indicadorGuardado.classList.add('hidden');
+
+        // Programar guardado en 500ms
+        moduloEnviosCreados.autoSaveTimeout = setTimeout(() => {
+            moduloEnviosCreados.autoGuardarProgreso();
+        }, 500);
+    },
+
+    // ============================================
+    // AUTO-GUARDADO: Ejecutar guardado silencioso
+    // ============================================
+    autoGuardarProgreso: async () => {
         const envio = moduloEnviosCreados.preparacionActiva;
         if (!envio) return;
 
@@ -1385,15 +1554,31 @@ export const moduloEnviosCreados = {
 
             if (error) throw error;
 
-            // Marcar que no hay cambios pendientes
-            moduloEnviosCreados.cambiosPendientes = false;
-            moduloEnviosCreados.actualizarBotonGuardar();
-
-            mostrarNotificacion('Progreso guardado. Podés continuar después.', 'success');
+            // Mostrar indicador "Guardado" brevemente
+            const indicadorGuardando = document.getElementById('indicador-guardando');
+            const indicadorGuardado = document.getElementById('indicador-guardado');
+            if (indicadorGuardando) indicadorGuardando.classList.add('hidden');
+            if (indicadorGuardado) {
+                indicadorGuardado.classList.remove('hidden');
+                // Ocultar después de 2 segundos
+                setTimeout(() => indicadorGuardado.classList.add('hidden'), 2000);
+            }
 
         } catch (error) {
-            console.error('Error guardando progreso:', error);
-            mostrarNotificacion('Error al guardar progreso', 'error');
+            console.error('Error en auto-guardado:', error);
+            // Mostrar error brevemente
+            const indicadorGuardando = document.getElementById('indicador-guardando');
+            if (indicadorGuardando) {
+                indicadorGuardando.innerHTML = '<i class="fas fa-exclamation-circle"></i> Error al guardar';
+                indicadorGuardando.classList.remove('text-blue-500');
+                indicadorGuardando.classList.add('text-red-500');
+                setTimeout(() => {
+                    indicadorGuardando.classList.add('hidden');
+                    indicadorGuardando.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Guardando...';
+                    indicadorGuardando.classList.remove('text-red-500');
+                    indicadorGuardando.classList.add('text-blue-500');
+                }, 2000);
+            }
         }
     },
 
@@ -1417,62 +1602,25 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // BOTÓN DINÁMICO: Guardar/Salir
+    // VOLVER: Salir de preparación (siempre funciona, ya se auto-guardó)
     // ============================================
-    actualizarBotonGuardar: () => {
-        const btn = document.getElementById('btn-guardar-salir');
-        if (!btn) return;
-
-        if (moduloEnviosCreados.cambiosPendientes) {
-            // Hay cambios sin guardar → mostrar "Guardar"
-            btn.innerHTML = '<i class="fas fa-save mr-1"></i>Guardar y Continuar';
-            btn.className = 'px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors';
-        } else {
-            // Todo guardado → mostrar "Salir"
-            btn.innerHTML = '<i class="fas fa-sign-out-alt mr-1"></i>Salir';
-            btn.className = 'px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors';
+    volverDePreparacion: async () => {
+        // Cancelar cualquier auto-guardado pendiente y ejecutar guardado final
+        if (moduloEnviosCreados.autoSaveTimeout) {
+            clearTimeout(moduloEnviosCreados.autoSaveTimeout);
+            await moduloEnviosCreados.autoGuardarProgreso();
         }
-    },
 
-    accionBotonGuardarSalir: async () => {
-        if (moduloEnviosCreados.cambiosPendientes) {
-            // Hay cambios → guardar
-            await moduloEnviosCreados.guardarProgresoPreparacion();
-        } else {
-            // Ya guardado → salir sin confirmación
-            await moduloEnviosCreados.salirPreparacion();
+        // Desuscribirse de Realtime si existe
+        if (moduloEnviosCreados.realtimeChannel) {
+            supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+            moduloEnviosCreados.realtimeChannel = null;
         }
-    },
 
-    salirPreparacion: async () => {
-        // Salir sin pedir confirmación (ya guardó)
+        // Limpiar estado
         moduloEnviosCreados.preparacionActiva = null;
         moduloEnviosCreados.productosPreparacion = [];
         moduloEnviosCreados.ultimoSkuFoco = null;
-        moduloEnviosCreados.cambiosPendientes = false;
-
-        // Volver a la lista
-        const contenedor = document.getElementById('app-content');
-        await moduloEnviosCreados.render(contenedor);
-    },
-
-    cancelarPreparacion: async () => {
-        // Solo pedir confirmación si hay cambios sin guardar
-        if (moduloEnviosCreados.cambiosPendientes) {
-            const confirmado = await confirmarAccion(
-                'Cancelar preparación',
-                '¿Seguro que querés cancelar? Se perderá el progreso de escaneo no guardado.',
-                'warning',
-                'Sí, Cancelar'
-            );
-
-            if (!confirmado) return;
-        }
-
-        moduloEnviosCreados.preparacionActiva = null;
-        moduloEnviosCreados.productosPreparacion = [];
-        moduloEnviosCreados.ultimoSkuFoco = null;
-        moduloEnviosCreados.cambiosPendientes = false;
 
         // Volver a la lista
         const contenedor = document.getElementById('app-content');
@@ -1483,22 +1631,128 @@ export const moduloEnviosCreados = {
         const envio = moduloEnviosCreados.preparacionActiva;
         if (!envio) return;
 
-        // Verificar si está todo completo
-        const todosCompletos = moduloEnviosCreados.productosPreparacion.every(
-            p => (p.cantidad_escaneada || 0) >= (p.cantidad_enviada || 0)
+        // Obtener productos incompletos
+        const incompletos = moduloEnviosCreados.productosPreparacion.filter(
+            p => (p.cantidad_escaneada || 0) < (p.cantidad_enviada || 0)
         );
 
-        if (!todosCompletos) {
-            const continuar = await confirmarAccion(
-                'Preparación incompleta',
-                'No todos los productos están completos. ¿Querés finalizar igual?',
-                'warning',
-                'Sí, Finalizar'
-            );
-            if (!continuar) return;
+        if (incompletos.length > 0) {
+            // Mostrar modal con productos incompletos
+            moduloEnviosCreados.mostrarModalIncompletos(incompletos);
+            return;
         }
 
+        // Todo completo, finalizar directamente
+        await moduloEnviosCreados.ejecutarFinalizacion();
+    },
+
+    // ============================================
+    // MODAL INCOMPLETOS: Mostrar modal con lista editable
+    // ============================================
+    mostrarModalIncompletos: (incompletos) => {
+        const listaDiv = document.getElementById('lista-incompletos');
+
+        listaDiv.innerHTML = incompletos.map((p, idx) => `
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3" data-sku="${p.sku}">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1 min-w-0 mr-3">
+                        <p class="font-medium text-gray-800 truncate">${p.sku}</p>
+                        <p class="text-xs text-gray-500 truncate">${p.titulo || '-'}</p>
+                    </div>
+                    <div class="flex items-center gap-3 text-sm">
+                        <div class="text-center">
+                            <p class="text-xs text-gray-400">Planificado</p>
+                            <p class="font-bold text-gray-600">${p.cantidad_enviada || 0}</p>
+                        </div>
+                        <div class="text-gray-300">→</div>
+                        <div class="text-center">
+                            <p class="text-xs text-gray-400">Escaneado</p>
+                            <p class="font-bold text-blue-600">${p.cantidad_escaneada || 0}</p>
+                        </div>
+                        <div class="text-gray-300">→</div>
+                        <div class="text-center">
+                            <p class="text-xs text-gray-400">Final</p>
+                            <input type="number"
+                                   class="w-16 text-center border border-yellow-300 rounded px-2 py-1 font-bold cantidad-final-input"
+                                   value="${p.cantidad_escaneada || 0}"
+                                   min="0"
+                                   max="${p.cantidad_enviada || 0}"
+                                   data-sku="${p.sku}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+        document.getElementById('modal-finalizar-incompletos').classList.remove('hidden');
+    },
+
+    // ============================================
+    // MODAL INCOMPLETOS: Cerrar modal
+    // ============================================
+    cerrarModalIncompletos: () => {
+        document.getElementById('modal-finalizar-incompletos').classList.add('hidden');
+    },
+
+    // ============================================
+    // MODAL INCOMPLETOS: Confirmar y finalizar con cantidades ajustadas
+    // ============================================
+    confirmarFinalizarConIncompletos: async () => {
+        // Obtener cantidades finales del modal
+        const inputs = document.querySelectorAll('.cantidad-final-input');
+        const cantidadesFinales = {};
+
+        inputs.forEach(input => {
+            cantidadesFinales[input.dataset.sku] = parseInt(input.value) || 0;
+        });
+
+        // Actualizar cantidades en productosPreparacion
+        moduloEnviosCreados.productosPreparacion.forEach(p => {
+            if (cantidadesFinales[p.sku] !== undefined) {
+                // Usar la cantidad final ingresada como la nueva cantidad_enviada
+                p.cantidad_enviada = cantidadesFinales[p.sku];
+                p.cantidad_escaneada = cantidadesFinales[p.sku];
+            }
+        });
+
+        // Cerrar modal
+        moduloEnviosCreados.cerrarModalIncompletos();
+
+        // Ejecutar finalización con cantidades actualizadas
+        await moduloEnviosCreados.ejecutarFinalizacion(true);
+    },
+
+    // ============================================
+    // EJECUTAR FINALIZACIÓN: Lógica común para finalizar
+    // ============================================
+    ejecutarFinalizacion: async (actualizarCantidades = false) => {
+        const envio = moduloEnviosCreados.preparacionActiva;
+        if (!envio) return;
+
         try {
+            // Si hay que actualizar cantidades en detalle_envios_full
+            if (actualizarCantidades) {
+                // Eliminar detalles anteriores
+                await supabase
+                    .from('detalle_envios_full')
+                    .delete()
+                    .eq('id_envio', envio.id_envio);
+
+                // Insertar con cantidades actualizadas
+                const detallesActualizados = moduloEnviosCreados.productosPreparacion.map(p => ({
+                    id_envio: envio.id_envio,
+                    sku: p.sku,
+                    id_publicacion: p.id_publicacion || null,
+                    cantidad_enviada: p.cantidad_enviada
+                }));
+
+                const { error: errorDetalles } = await supabase
+                    .from('detalle_envios_full')
+                    .insert(detallesActualizados);
+
+                if (errorDetalles) throw errorDetalles;
+            }
+
             // Cambiar estado a "Despachado"
             const { error } = await supabase
                 .from('registro_envios_full')
@@ -1512,6 +1766,12 @@ export const moduloEnviosCreados = {
                 .from('preparacion_en_curso')
                 .delete()
                 .eq('id_envio', envio.id_envio);
+
+            // Desuscribirse de Realtime
+            if (moduloEnviosCreados.realtimeChannel) {
+                supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+                moduloEnviosCreados.realtimeChannel = null;
+            }
 
             mostrarNotificacion('Preparación finalizada. Envío marcado como Despachado.', 'success');
 

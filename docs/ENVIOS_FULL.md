@@ -78,6 +78,35 @@ Interfaz para escanear productos antes del despacho.
 2. **Ajuste manual**: Botones +/- para corregir
 3. **Selección por click**: Click en fila para seleccionar producto
 4. **Validación**: Compara escaneados vs requeridos
+5. **Auto-guardado**: Cada cambio se guarda automáticamente (debounce 500ms)
+6. **Multi-usuario**: Sincronización en tiempo real via Supabase Realtime
+
+### Auto-guardado
+
+- Cualquier cambio (escaneo, +/-) dispara auto-guardado con debounce de 500ms
+- Indicador visual: "Guardando..." → "✓ Guardado"
+- No hay botón "Guardar", el progreso se persiste automáticamente
+- Botón "Volver" siempre disponible (sin confirmación)
+
+### Multi-usuario (Realtime)
+
+Permite que múltiples usuarios trabajen simultáneamente en el mismo envío:
+
+1. Al iniciar preparación, se suscribe a cambios en `preparacion_en_curso`
+2. Cuando otro usuario hace cambios, se sincroniza automáticamente
+3. Notificación: "Cambios sincronizados de otro usuario"
+4. Debounce de 300ms para evitar múltiples actualizaciones
+
+**Requisito**: Ejecutar script `scripts/HABILITAR_REALTIME_PREPARACION.sql` en Supabase.
+
+### Modal de Finalización con Incompletos
+
+Si hay productos con menos unidades escaneadas que las planificadas:
+
+1. Muestra modal con lista de productos incompletos
+2. Cada producto tiene input editable para cantidad final
+3. Al confirmar, actualiza `detalle_envios_full` con cantidades corregidas
+4. Cambia estado a "Despachado"
 
 ### Layout de Tabla
 
@@ -87,7 +116,7 @@ Interfaz para escanear productos antes del despacho.
 | Inventory ID | 112px (w-28) | Código ML |
 | A Enviar | 80px (w-20) | Cantidad requerida |
 | Escaneados | 96px (w-24) | Cantidad escaneada |
-| Estado | 96px (w-24) | Pendiente/En Progreso/Completado |
+| Estado | 112px (w-28) | Pendiente/En Progreso/Completado |
 
 ---
 
@@ -100,11 +129,14 @@ Interfaz para escanear productos antes del despacho.
 2. Cambiar a "En Preparación"
    └── Habilita botón de preparación
 
-3. Escanear productos
-   └── Validar cantidades
+3. Escanear productos (multi-usuario habilitado)
+   ├── Auto-guardado en cada cambio
+   ├── Sincronización Realtime entre usuarios
+   └── Botón "Volver" para salir (progreso ya guardado)
 
 4. Finalizar preparación
-   └── Estado: Despachado
+   ├── Si todo completo → Despachado directo
+   └── Si hay incompletos → Modal para ajustar cantidades
 
 5. ML confirma recepción
    └── Estado: Recibido
