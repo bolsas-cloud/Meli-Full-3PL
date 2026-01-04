@@ -12,11 +12,15 @@ import { mostrarNotificacion, formatearMoneda, confirmarAccion } from '../utils.
 let productos = [];
 let productosOriginales = [];
 let seleccionados = new Set();
+let fallosPendientes = {}; // Map: sku -> { cantidad, ultimoIntento, ultimoPrecio }
 let filtros = {
     busqueda: '',
-    estado: 'todos'
+    estado: 'todos',
+    fallos: false // Nuevo filtro para productos con fallos
 };
 let pctComisionPromedio = 30; // Default 30%, se actualiza con datos reales
+let tipoModificacionActual = 'porcentaje'; // Para registrar en fallos
+let valorModificacionActual = 0; // Para registrar en fallos
 
 export const moduloPrecios = {
 
@@ -50,6 +54,11 @@ export const moduloPrecios = {
                                 <button class="btn-filtro-estado px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-estado="paused">
                                     <span class="w-2 h-2 rounded-full bg-yellow-500 inline-block mr-1"></span>
                                     Pausadas
+                                </button>
+                                <button id="btn-filtro-fallos" class="btn-filtro-fallos px-3 py-2 rounded-lg text-sm font-medium transition-colors hidden" data-fallos="true">
+                                    <span class="w-2 h-2 rounded-full bg-red-500 inline-block mr-1"></span>
+                                    Con Fallos
+                                    <span id="badge-fallos" class="ml-1 bg-red-600 text-white text-xs px-1.5 py-0.5 rounded-full">0</span>
                                 </button>
                             </div>
                         </div>
@@ -133,6 +142,11 @@ export const moduloPrecios = {
             .btn-filtro-estado { background: #f3f4f6; color: #6b7280; }
             .btn-filtro-estado:hover { background: #e5e7eb; }
             .btn-filtro-estado.active { background: #4eab87; color: white; }
+            .btn-filtro-fallos { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+            .btn-filtro-fallos:hover { background: #fee2e2; }
+            .btn-filtro-fallos.active { background: #dc2626; color: white; border-color: #dc2626; }
+            .row-con-fallo { background: #fef2f2 !important; }
+            .row-con-fallo:hover { background: #fee2e2 !important; }
         `;
         document.head.appendChild(style);
 
@@ -145,10 +159,31 @@ export const moduloPrecios = {
         document.querySelectorAll('.btn-filtro-estado').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.btn-filtro-estado').forEach(b => b.classList.remove('active'));
+                document.getElementById('btn-filtro-fallos')?.classList.remove('active');
                 btn.classList.add('active');
                 filtros.estado = btn.dataset.estado;
+                filtros.fallos = false;
                 moduloPrecios.pintarTabla();
             });
+        });
+
+        // Evento para filtro de fallos
+        document.getElementById('btn-filtro-fallos')?.addEventListener('click', () => {
+            const btnFallos = document.getElementById('btn-filtro-fallos');
+            const isActive = btnFallos.classList.contains('active');
+
+            if (isActive) {
+                // Desactivar filtro de fallos
+                btnFallos.classList.remove('active');
+                filtros.fallos = false;
+            } else {
+                // Activar filtro de fallos
+                document.querySelectorAll('.btn-filtro-estado').forEach(b => b.classList.remove('active'));
+                btnFallos.classList.add('active');
+                filtros.fallos = true;
+                filtros.estado = 'todos';
+            }
+            moduloPrecios.pintarTabla();
         });
 
         // Exponer en window para eventos onclick
@@ -178,9 +213,9 @@ export const moduloPrecios = {
             }
 
             // ============================================
-            // PARALELO: Cargar comisión promedio y productos a la vez
+            // PARALELO: Cargar comisión promedio, productos y fallos
             // ============================================
-            const [ordenesRes, productosRes] = await Promise.all([
+            const [ordenesRes, productosRes, fallosRes] = await Promise.all([
                 supabase
                     .from('ordenes_meli')
                     .select('pct_costo_meli')
@@ -190,7 +225,10 @@ export const moduloPrecios = {
                 supabase
                     .from('publicaciones_meli')
                     .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica')
-                    .order('titulo')
+                    .order('titulo'),
+                supabase
+                    .from('v_precios_fallos_pendientes')
+                    .select('*')
             ]);
 
             // Procesar comisión promedio
@@ -206,6 +244,32 @@ export const moduloPrecios = {
             productos = productosRes.data || [];
             productosOriginales = JSON.parse(JSON.stringify(productos));
             seleccionados.clear();
+
+            // Procesar fallos pendientes
+            fallosPendientes = {};
+            if (fallosRes.data && fallosRes.data.length > 0) {
+                fallosRes.data.forEach(f => {
+                    fallosPendientes[f.sku] = {
+                        cantidad: f.cantidad_fallos,
+                        ultimoIntento: f.ultimo_intento,
+                        ultimoPrecio: f.ultimo_precio_intentado,
+                        idPublicacion: f.id_publicacion
+                    };
+                });
+            }
+
+            // Actualizar badge y visibilidad del filtro de fallos
+            const cantidadFallos = Object.keys(fallosPendientes).length;
+            const btnFallos = document.getElementById('btn-filtro-fallos');
+            const badgeFallos = document.getElementById('badge-fallos');
+
+            if (cantidadFallos > 0) {
+                btnFallos?.classList.remove('hidden');
+                if (badgeFallos) badgeFallos.textContent = cantidadFallos;
+            } else {
+                btnFallos?.classList.add('hidden');
+                filtros.fallos = false;
+            }
 
             moduloPrecios.pintarTabla();
             mostrarNotificacion(`${productos.length} productos cargados`, 'success');
@@ -239,7 +303,10 @@ export const moduloPrecios = {
 
             const matchEstado = filtros.estado === 'todos' || p.estado === filtros.estado;
 
-            return matchBusqueda && matchEstado;
+            // Filtro de fallos
+            const matchFallos = !filtros.fallos || fallosPendientes[p.sku];
+
+            return matchBusqueda && matchEstado && matchFallos;
         });
 
         if (productosFiltrados.length === 0) {
@@ -263,6 +330,10 @@ export const moduloPrecios = {
             const estadoColor = p.estado === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800';
             const estadoTexto = p.estado === 'active' ? 'Activa' : 'Pausada';
 
+            // Info de fallos pendientes
+            const falloInfo = fallosPendientes[p.sku];
+            const tieneFallo = !!falloInfo;
+
             // Calcular neto estimado
             // Prioridad 1: usar campos de comisión de la BD (poblados por sync-prices)
             // Prioridad 2: usar % promedio de órdenes como fallback
@@ -283,17 +354,39 @@ export const moduloPrecios = {
             // Calcular % markup sobre neto (cuánto hay que cargarle al neto para llegar al precio)
             const pctMarkup = netoEstimado > 0 ? ((precioParaNeto - netoEstimado) / netoEstimado * 100).toFixed(1) : 0;
 
+            // Determinar clase de fila
+            const rowClass = tieneFallo
+                ? 'row-con-fallo'
+                : (precioModificado ? 'bg-yellow-50' : '');
+
             return `
-                <tr class="hover:bg-gray-50 transition-colors ${precioModificado ? 'bg-yellow-50' : ''}">
+                <tr class="hover:bg-gray-50 transition-colors ${rowClass}">
                     <td class="px-4 py-3">
                         <input type="checkbox"
                                class="rounded border-gray-300 text-brand focus:ring-brand"
                                ${isSelected ? 'checked' : ''}
                                onchange="moduloPrecios.toggleSeleccion('${p.sku}', this.checked)">
                     </td>
-                    <td class="px-4 py-3 font-mono text-sm text-gray-600">${p.sku || '-'}</td>
+                    <td class="px-4 py-3 font-mono text-sm text-gray-600">
+                        ${p.sku || '-'}
+                        ${tieneFallo ? `
+                            <span class="ml-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full" title="Fallos pendientes de actualización">
+                                ${falloInfo.cantidad}
+                            </span>
+                        ` : ''}
+                    </td>
                     <td class="px-4 py-3">
                         <div class="max-w-lg truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                        ${tieneFallo ? `
+                            <div class="text-xs text-red-600 mt-1">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Precio pendiente: ${formatearMoneda(falloInfo.ultimoPrecio)}
+                                <button onclick="moduloPrecios.reintentarFallo('${p.sku}')"
+                                        class="ml-2 text-blue-600 hover:text-blue-800 underline">
+                                    <i class="fas fa-redo mr-1"></i>Reintentar
+                                </button>
+                            </div>
+                        ` : ''}
                     </td>
                     <td class="px-4 py-3 text-right font-medium ${precioModificado ? 'line-through text-gray-400' : 'text-gray-800'}">
                         ${formatearMoneda(precioOriginal)}
@@ -390,6 +483,10 @@ export const moduloPrecios = {
             return;
         }
 
+        // Guardar para registro de fallos
+        tipoModificacionActual = tipo;
+        valorModificacionActual = valor;
+
         let modificados = 0;
 
         productos.forEach(p => {
@@ -457,6 +554,7 @@ export const moduloPrecios = {
             const productosParaActualizar = productosModificados.map(p => ({
                 itemId: p.id_publicacion,
                 sku: p.sku,
+                titulo: p.titulo,
                 precioAnterior: productosOriginales.find(o => o.sku === p.sku)?.precio || p.precio,
                 nuevoPrecio: p.precioNuevo
             }));
@@ -471,34 +569,70 @@ export const moduloPrecios = {
 
             if (error) throw error;
 
-            if (data.success) {
-                mostrarNotificacion(`${data.exitos} precios actualizados correctamente`, 'success');
+            const exitosos = data.exitos || 0;
+            const fallidos = data.fallidos || [];
 
-                // Actualizar estado local
-                productosModificados.forEach(p => {
+            // Marcar como resueltos los fallos previos de productos exitosos
+            if (exitosos > 0) {
+                const skusExitosos = productosParaActualizar
+                    .filter(p => !fallidos.find(f => f.sku === p.sku))
+                    .map(p => p.sku);
+
+                if (skusExitosos.length > 0) {
+                    await supabase
+                        .from('precios_actualizacion_fallidas')
+                        .update({ estado: 'resuelto', fecha_resolucion: new Date().toISOString() })
+                        .in('sku', skusExitosos)
+                        .eq('estado', 'pendiente');
+                }
+            }
+
+            // Registrar los fallos en la tabla
+            if (fallidos.length > 0) {
+                const registrosFallos = fallidos.map(f => {
+                    const prodInfo = productosParaActualizar.find(p => p.sku === f.sku);
+                    return {
+                        sku: f.sku,
+                        id_publicacion: f.itemId || prodInfo?.itemId,
+                        titulo: prodInfo?.titulo,
+                        precio_anterior: prodInfo?.precioAnterior,
+                        precio_nuevo: prodInfo?.nuevoPrecio,
+                        tipo_modificacion: tipoModificacionActual,
+                        valor_modificacion: valorModificacionActual,
+                        error_mensaje: f.error,
+                        estado: 'pendiente'
+                    };
+                });
+
+                await supabase
+                    .from('precios_actualizacion_fallidas')
+                    .insert(registrosFallos);
+            }
+
+            // Actualizar estado local de productos exitosos
+            productosModificados.forEach(p => {
+                const fallo = fallidos.find(f => f.sku === p.sku);
+                if (!fallo) {
                     const original = productosOriginales.find(o => o.sku === p.sku);
                     if (original) {
                         original.precio = p.precioNuevo;
                     }
                     p.precio = p.precioNuevo;
-                    delete p.precioNuevo;
-                });
-
-                seleccionados.clear();
-                moduloPrecios.pintarTabla();
-
-            } else if (data.fallidos && data.fallidos.length > 0) {
-                // Algunos fallaron
-                const exitosos = data.exitos || 0;
-                const errores = data.fallidos.map(f => `${f.sku}: ${f.error}`).join('\n');
-
-                mostrarNotificacion(`${exitosos} exitosos, ${data.fallidos.length} con errores`, 'warning');
-                console.error('Errores de actualización:', errores);
-
-                // Actualizar solo los exitosos
-                if (exitosos > 0) {
-                    await moduloPrecios.cargarProductos();
                 }
+                delete p.precioNuevo;
+            });
+
+            seleccionados.clear();
+
+            // Mostrar resultado
+            if (fallidos.length === 0) {
+                mostrarNotificacion(`${exitosos} precios actualizados correctamente`, 'success');
+                moduloPrecios.pintarTabla();
+            } else {
+                // Mostrar modal con productos fallidos
+                moduloPrecios.mostrarModalFallos(exitosos, fallidos);
+                // Recargar para actualizar badge de fallos
+                await moduloPrecios.cargarProductos();
             }
 
         } catch (error) {
@@ -507,6 +641,192 @@ export const moduloPrecios = {
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-save"></i> Guardar en ML';
+        }
+    },
+
+    // ============================================
+    // MOSTRAR MODAL FALLOS: Muestra resumen de productos fallidos
+    // ============================================
+    mostrarModalFallos: (exitosos, fallidos) => {
+        // Crear modal si no existe
+        let modal = document.getElementById('modal-fallos-precios');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'modal-fallos-precios';
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+            document.body.appendChild(modal);
+        }
+
+        modal.innerHTML = `
+            <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+                <div class="bg-red-600 text-white px-6 py-4">
+                    <h3 class="text-lg font-bold flex items-center gap-2">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Actualización con Errores
+                    </h3>
+                </div>
+                <div class="p-6">
+                    <div class="mb-4 flex gap-4">
+                        <div class="flex-1 bg-green-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-green-600">${exitosos}</div>
+                            <div class="text-sm text-green-700">Exitosos</div>
+                        </div>
+                        <div class="flex-1 bg-red-50 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-red-600">${fallidos.length}</div>
+                            <div class="text-sm text-red-700">Con Errores</div>
+                        </div>
+                    </div>
+
+                    <div class="text-sm text-gray-600 mb-3">
+                        Los siguientes productos no pudieron actualizarse:
+                    </div>
+
+                    <div class="max-h-64 overflow-y-auto border rounded-lg divide-y">
+                        ${fallidos.map(f => `
+                            <div class="p-3 hover:bg-gray-50">
+                                <div class="font-medium text-gray-800">${f.sku}</div>
+                                <div class="text-sm text-red-600">${f.error}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="mt-4 text-sm text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Estos productos quedan marcados para reintentar desde el listado.
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 flex justify-end gap-2">
+                    <button onclick="moduloPrecios.cerrarModalFallos()"
+                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        `;
+
+        modal.classList.remove('hidden');
+    },
+
+    // ============================================
+    // CERRAR MODAL FALLOS
+    // ============================================
+    cerrarModalFallos: () => {
+        const modal = document.getElementById('modal-fallos-precios');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    // ============================================
+    // REINTENTAR FALLO: Reintenta actualizar un precio fallido
+    // ============================================
+    reintentarFallo: async (sku) => {
+        const falloInfo = fallosPendientes[sku];
+        if (!falloInfo) {
+            mostrarNotificacion('No se encontró información del fallo', 'error');
+            return;
+        }
+
+        const producto = productos.find(p => p.sku === sku);
+        if (!producto) {
+            mostrarNotificacion('Producto no encontrado', 'error');
+            return;
+        }
+
+        const confirmar = await confirmarAccion(
+            'Reintentar Actualización',
+            `¿Reintentar actualizar "${sku}" a ${formatearMoneda(falloInfo.ultimoPrecio)}?`,
+            'warning',
+            'Sí, Reintentar'
+        );
+
+        if (!confirmar) return;
+
+        mostrarNotificacion('Reintentando actualización...', 'info');
+
+        try {
+            const { data, error } = await supabase.functions.invoke('sync-meli', {
+                body: {
+                    action: 'update-prices',
+                    productos: [{
+                        itemId: producto.id_publicacion,
+                        sku: sku,
+                        precioAnterior: producto.precio,
+                        nuevoPrecio: falloInfo.ultimoPrecio
+                    }]
+                }
+            });
+
+            if (error) throw error;
+
+            if (data.exitos > 0) {
+                // Marcar como resuelto
+                await supabase
+                    .from('precios_actualizacion_fallidas')
+                    .update({ estado: 'resuelto', fecha_resolucion: new Date().toISOString() })
+                    .eq('sku', sku)
+                    .eq('estado', 'pendiente');
+
+                mostrarNotificacion(`Precio de ${sku} actualizado correctamente`, 'success');
+
+                // Recargar productos
+                await moduloPrecios.cargarProductos();
+            } else if (data.fallidos?.length > 0) {
+                // Registrar nuevo fallo
+                await supabase
+                    .from('precios_actualizacion_fallidas')
+                    .update({ estado: 'reintentado' })
+                    .eq('sku', sku)
+                    .eq('estado', 'pendiente');
+
+                await supabase
+                    .from('precios_actualizacion_fallidas')
+                    .insert({
+                        sku: sku,
+                        id_publicacion: producto.id_publicacion,
+                        titulo: producto.titulo,
+                        precio_anterior: producto.precio,
+                        precio_nuevo: falloInfo.ultimoPrecio,
+                        tipo_modificacion: 'reintento',
+                        valor_modificacion: 0,
+                        error_mensaje: data.fallidos[0].error,
+                        estado: 'pendiente'
+                    });
+
+                mostrarNotificacion(`Error al actualizar: ${data.fallidos[0].error}`, 'error');
+                await moduloPrecios.cargarProductos();
+            }
+
+        } catch (error) {
+            console.error('Error reintentando:', error);
+            mostrarNotificacion('Error al reintentar actualización', 'error');
+        }
+    },
+
+    // ============================================
+    // DESCARTAR FALLO: Marca un fallo como descartado
+    // ============================================
+    descartarFallo: async (sku) => {
+        const confirmar = await confirmarAccion(
+            'Descartar Fallo',
+            `¿Descartar el fallo pendiente de "${sku}"? El precio no se actualizará.`,
+            'warning',
+            'Sí, Descartar'
+        );
+
+        if (!confirmar) return;
+
+        try {
+            await supabase
+                .from('precios_actualizacion_fallidas')
+                .update({ estado: 'descartado' })
+                .eq('sku', sku)
+                .eq('estado', 'pendiente');
+
+            mostrarNotificacion('Fallo descartado', 'info');
+            await moduloPrecios.cargarProductos();
+
+        } catch (error) {
+            console.error('Error descartando fallo:', error);
+            mostrarNotificacion('Error al descartar', 'error');
         }
     }
 };
