@@ -224,7 +224,7 @@ export const moduloEnviosCreados = {
                     .order('fecha_creacion', { ascending: false }),
                 supabase
                     .from('detalle_envios_full')
-                    .select('id_envio, sku, id_publicacion, cantidad_enviada')
+                    .select('id_envio, sku, id_publicacion, cantidad_enviada, cantidad_original')
             ]);
 
             if (enviosRes.error) throw enviosRes.error;
@@ -362,12 +362,21 @@ export const moduloEnviosCreados = {
                         Productos (${envio.productos.length})
                     </p>
                     <ul class="text-sm text-gray-600 max-h-24 overflow-y-auto space-y-1">
-                        ${envio.productos.slice(0, 5).map(p => `
+                        ${envio.productos.slice(0, 5).map(p => {
+                            const cantOriginal = p.cantidad_original || p.cantidad_enviada;
+                            const cantEnviada = p.cantidad_enviada || 0;
+                            const hayDiscrepancia = cantOriginal > cantEnviada;
+                            return `
                             <li class="flex justify-between">
                                 <span class="truncate" title="${p.titulo || p.sku}">${p.sku}</span>
-                                <span class="font-medium">${p.cantidad_enviada} uds</span>
-                            </li>
-                        `).join('')}
+                                ${hayDiscrepancia
+                                    ? `<span class="font-medium text-orange-600" title="Cantidad ajustada: ${cantEnviada} de ${cantOriginal}">
+                                        ${cantEnviada} <span class="text-xs text-gray-400">de ${cantOriginal}</span>
+                                       </span>`
+                                    : `<span class="font-medium">${cantEnviada} uds</span>`
+                                }
+                            </li>`;
+                        }).join('')}
                         ${envio.productos.length > 5 ? `<li class="text-gray-400 italic">+${envio.productos.length - 5} más...</li>` : ''}
                     </ul>
                 </div>
@@ -607,7 +616,8 @@ export const moduloEnviosCreados = {
                     id_envio: envioSeleccionado.id_envio,
                     sku: p.sku,
                     id_publicacion: p.id_publicacion || null,
-                    cantidad_enviada: p.cantidad_enviada
+                    cantidad_enviada: p.cantidad_enviada,
+                    cantidad_original: p.cantidad_original || p.cantidad_enviada // Guardar cantidad original
                 }));
 
                 const { error: errorDet } = await supabase
@@ -992,17 +1002,58 @@ export const moduloEnviosCreados = {
             doc.line(14, 42, 196, 42);
 
             // === TABLA DE PRODUCTOS ===
-            const productosData = envio.productos.map((p, idx) => [
-                idx + 1,
-                p.sku || '-',
-                inventoryMap[p.sku] || '-',
-                p.titulo || '-',
-                p.cantidad_enviada || 0
-            ]);
+            // Verificar si hay discrepancias para mostrar columna adicional
+            const hayDiscrepancias = envio.productos.some(p =>
+                (p.cantidad_original || p.cantidad_enviada) > (p.cantidad_enviada || 0)
+            );
+
+            const productosData = envio.productos.map((p, idx) => {
+                const cantOriginal = p.cantidad_original || p.cantidad_enviada;
+                const cantEnviada = p.cantidad_enviada || 0;
+                const tieneDiscrepancia = cantOriginal > cantEnviada;
+
+                const fila = [
+                    idx + 1,
+                    p.sku || '-',
+                    inventoryMap[p.sku] || '-',
+                    p.titulo || '-',
+                    cantEnviada
+                ];
+
+                // Agregar columna de original solo si hay discrepancias en algún producto
+                if (hayDiscrepancias) {
+                    fila.push(tieneDiscrepancia ? cantOriginal : '-');
+                }
+
+                return fila;
+            });
+
+            // Header dinámico según si hay discrepancias
+            const tableHead = hayDiscrepancias
+                ? [['#', 'SKU', 'Inv ID', 'Producto', 'Env', 'Orig']]
+                : [['#', 'SKU', 'Inv ID', 'Producto', 'Cant']];
+
+            // Estilos de columnas dinámicos
+            const columnStyles = hayDiscrepancias
+                ? {
+                    0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
+                    1: { cellWidth: 30, fontSize: 7, font: 'courier' },
+                    2: { cellWidth: 20, fontSize: 7, textColor: [100, 100, 100] },
+                    3: { cellWidth: 94 },
+                    4: { cellWidth: 14, halign: 'center', fontStyle: 'bold', textColor: [234, 88, 12] }, // Naranja para enviado
+                    5: { cellWidth: 14, halign: 'center', textColor: [150, 150, 150] } // Gris para original
+                }
+                : {
+                    0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
+                    1: { cellWidth: 34, fontSize: 7, font: 'courier' },
+                    2: { cellWidth: 22, fontSize: 7, textColor: [100, 100, 100] },
+                    3: { cellWidth: 104 },
+                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold', textColor: [50, 50, 50] }
+                };
 
             doc.autoTable({
                 startY: 48,
-                head: [['#', 'SKU', 'Inv ID', 'Producto', 'Cant']],
+                head: tableHead,
                 body: productosData,
                 theme: 'plain',
                 headStyles: {
@@ -1023,13 +1074,7 @@ export const moduloEnviosCreados = {
                 alternateRowStyles: {
                     fillColor: [252, 252, 253]
                 },
-                columnStyles: {
-                    0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
-                    1: { cellWidth: 34, fontSize: 7, font: 'courier' },
-                    2: { cellWidth: 22, fontSize: 7, textColor: [100, 100, 100] },
-                    3: { cellWidth: 104 },
-                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold', textColor: [50, 50, 50] }
-                },
+                columnStyles: columnStyles,
                 styles: {
                     overflow: 'linebreak',
                     cellPadding: 3
@@ -1732,18 +1777,34 @@ export const moduloEnviosCreados = {
         try {
             // Si hay que actualizar cantidades en detalle_envios_full
             if (actualizarCantidades) {
+                // Primero obtener las cantidades originales de la BD
+                const { data: detallesOriginales } = await supabase
+                    .from('detalle_envios_full')
+                    .select('sku, cantidad_enviada, cantidad_original')
+                    .eq('id_envio', envio.id_envio);
+
+                // Crear mapa de cantidades originales
+                const cantidadesOriginales = {};
+                if (detallesOriginales) {
+                    detallesOriginales.forEach(d => {
+                        // Usar cantidad_original si existe, sino cantidad_enviada original
+                        cantidadesOriginales[d.sku] = d.cantidad_original || d.cantidad_enviada;
+                    });
+                }
+
                 // Eliminar detalles anteriores
                 await supabase
                     .from('detalle_envios_full')
                     .delete()
                     .eq('id_envio', envio.id_envio);
 
-                // Insertar con cantidades actualizadas
+                // Insertar con cantidades actualizadas, preservando cantidad_original
                 const detallesActualizados = moduloEnviosCreados.productosPreparacion.map(p => ({
                     id_envio: envio.id_envio,
                     sku: p.sku,
                     id_publicacion: p.id_publicacion || null,
-                    cantidad_enviada: p.cantidad_enviada
+                    cantidad_enviada: p.cantidad_enviada,
+                    cantidad_original: cantidadesOriginales[p.sku] || p.cantidad_enviada
                 }));
 
                 const { error: errorDetalles } = await supabase

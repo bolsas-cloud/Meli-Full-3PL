@@ -173,13 +173,75 @@ Auditoría de todos los cambios de precios realizados.
 
 ---
 
+## Sistema de Tracking de Fallos (v1.1.0)
+
+Cuando una actualización de precio falla (ej: producto con promoción activa), el sistema registra el fallo para poder reintentar posteriormente.
+
+### Tabla: precios_actualizacion_fallidas
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| id | UUID | PK |
+| sku | TEXT | SKU del producto |
+| id_publicacion | TEXT | ID publicación ML |
+| titulo | TEXT | Título del producto |
+| precio_anterior | NUMERIC | Precio antes del intento |
+| precio_nuevo | NUMERIC | Precio que se intentó aplicar |
+| tipo_modificacion | TEXT | 'porcentaje' o 'fijo' |
+| valor_modificacion | NUMERIC | Valor aplicado (ej: 10 para +10%) |
+| fecha_intento | TIMESTAMP | Cuándo se intentó |
+| error_mensaje | TEXT | Error devuelto por ML |
+| estado | TEXT | 'pendiente', 'reintentado', 'resuelto', 'descartado' |
+| fecha_resolucion | TIMESTAMP | Cuándo se resolvió |
+
+### Indicadores Visuales
+
+- **Filtro "Con Fallos"**: Botón rojo que aparece solo si hay fallos pendientes
+- **Badge rojo**: Junto al SKU muestra cantidad de intentos fallidos
+- **Fila roja**: Productos con fallos pendientes aparecen destacados
+- **Precio pendiente**: Muestra el precio que se intentó aplicar
+
+### Flujo de Reintento
+
+```
+1. Al guardar en ML, algunos fallan
+   └── Se muestra modal con resumen (exitosos/fallidos)
+   └── Fallos se registran en tabla
+
+2. Al volver al listado
+   └── Productos con fallos aparecen en rojo
+   └── Badge muestra cantidad de fallos
+   └── Filtro "Con Fallos" visible
+
+3. Click en "Reintentar"
+   └── Reintenta actualizar ese producto
+   └── Si éxito: marca como 'resuelto'
+   └── Si falla: registra nuevo intento
+
+4. Auto-resolución
+   └── Si un producto con fallo previo se actualiza exitosamente
+   └── Se marcan como 'resuelto' los fallos anteriores
+```
+
+### Vista: v_precios_fallos_pendientes
+
+Vista para consultar fallos agrupados por SKU:
+
+```sql
+SELECT sku, id_publicacion, cantidad_fallos, ultimo_intento, ultimo_precio_intentado
+FROM v_precios_fallos_pendientes;
+```
+
+---
+
 ## Notas Técnicas
 
 - La previsualización **NO guarda cambios** - solo muestra en pantalla
 - El botón "Guardar" es el que efectivamente envía a ML
 - Si un producto tiene promoción activa, ML puede rechazar el cambio de precio
 - Los filtros permiten buscar por SKU/título y filtrar por estado
+- **Nuevo**: Los fallos se registran para poder reintentar después
 
 ---
 
-*Última actualización: Diciembre 2025*
+*Última actualización: Enero 2026*

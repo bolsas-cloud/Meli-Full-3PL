@@ -26,7 +26,10 @@ El módulo de Envíos gestiona la creación, preparación y seguimiento de enví
 | `id_envio` | TEXT | **FK** → registro_envios_full |
 | `sku` | TEXT | SKU del producto |
 | `id_publicacion` | TEXT | ID de publicación ML |
-| `cantidad_enviada` | INTEGER | Cantidad a enviar |
+| `cantidad_enviada` | INTEGER | Cantidad final enviada |
+| `cantidad_original` | INTEGER | Cantidad originalmente planificada (v1.1.0) |
+
+> **Nota**: Si `cantidad_enviada < cantidad_original`, hubo una discrepancia al finalizar la preparación.
 
 ### preparacion_en_curso
 
@@ -106,7 +109,21 @@ Si hay productos con menos unidades escaneadas que las planificadas:
 1. Muestra modal con lista de productos incompletos
 2. Cada producto tiene input editable para cantidad final
 3. Al confirmar, actualiza `detalle_envios_full` con cantidades corregidas
-4. Cambia estado a "Despachado"
+4. Guarda `cantidad_original` (planificada) y `cantidad_enviada` (final real)
+5. Cambia estado a "Despachado"
+
+### Visualización de Discrepancias (v1.1.0)
+
+Cuando hay diferencia entre cantidad original y enviada:
+
+**En la Card del Envío:**
+- Muestra: `8 de 10` (naranja) en lugar de `10 uds`
+- Tooltip con detalle: "Cantidad ajustada: 8 de 10"
+
+**En el PDF:**
+- Se agregan columnas: `Env` (enviado) y `Orig` (original)
+- Columna Env en naranja para destacar discrepancia
+- Solo aparecen estas columnas si hay al menos una discrepancia
 
 ### Layout de Tabla
 
@@ -153,4 +170,4 @@ Si hay productos con menos unidades escaneadas que las planificadas:
 
 ---
 
-*Última actualización: Diciembre 2025*
+*Última actualización: Enero 2026*

@@ -586,14 +586,24 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // SELECCIÓN: Toggle todos
+    // SELECCIÓN: Toggle todos (solo con cantidad > 0)
     // ============================================
     toggleAll: (checkbox) => {
         if (checkbox.checked) {
-            sugerencias.forEach(s => {
-                const key = s.id_publicacion || s.sku;
-                productosSeleccionados.add(key);
-            });
+            // Solo seleccionar productos con cantidad a enviar > 0
+            sugerencias
+                .filter(s => (parseInt(s.cantidad_a_enviar) || 0) > 0)
+                .forEach(s => {
+                    const key = s.id_publicacion || s.sku;
+                    productosSeleccionados.add(key);
+                });
+
+            const conCantidad = sugerencias.filter(s => (parseInt(s.cantidad_a_enviar) || 0) > 0).length;
+            if (conCantidad === 0) {
+                mostrarNotificacion('No hay productos con cantidad > 0', 'warning');
+            } else if (conCantidad < sugerencias.length) {
+                mostrarNotificacion(`${conCantidad} de ${sugerencias.length} productos seleccionados (solo con cantidad > 0)`, 'info');
+            }
         } else {
             productosSeleccionados.clear();
         }
