@@ -1507,6 +1507,9 @@ export const moduloEnviosCreados = {
         moduloEnviosCreados.programarAutoGuardado();
 
         moduloEnviosCreados.actualizarUIPreparacion(idx);
+
+        // Devolver foco al input del escáner para que la lectora funcione correctamente
+        document.getElementById('input-escaner')?.focus();
     },
 
     actualizarUIPreparacion: (idxActualizado) => {
