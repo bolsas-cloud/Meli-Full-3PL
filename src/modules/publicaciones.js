@@ -85,15 +85,15 @@ export const moduloPublicaciones = {
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">ID Publicación</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Inventory ID</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Precio</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Stock Full</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Acciones</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-32">ID Pub.</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-36">SKU</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-24">Inv. ID</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-24">Precio</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16">Stock</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Logística</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20">Estado</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-publicaciones" class="divide-y divide-gray-100">
@@ -340,42 +340,46 @@ export const moduloPublicaciones = {
             const skuClass = p.sku ? '' : 'text-red-500 italic';
             const invClass = p.id_inventario ? '' : 'text-red-500 italic';
 
+            // Generar slug para URL de ML
+            const slug = moduloPublicaciones.generarSlug(p.titulo || '');
+            const urlML = `https://www.mercadolibre.com.ar/${slug}/p/${p.id_publicacion}`;
+
             return `
                 <tr class="hover:bg-gray-50 transition-colors">
-                    <td class="px-4 py-3">
-                        <a href="https://articulo.mercadolibre.com.ar/${p.id_publicacion}" target="_blank"
-                           class="text-blue-600 hover:underline font-mono text-sm">
+                    <td class="px-2 py-2">
+                        <a href="${urlML}" target="_blank"
+                           class="text-blue-600 hover:underline font-mono text-xs">
                             ${p.id_publicacion || '-'}
                         </a>
                     </td>
-                    <td class="px-4 py-3 font-mono text-sm ${skuClass}">${p.sku || '(sin SKU)'}</td>
-                    <td class="px-4 py-3 font-mono text-sm ${invClass}">${p.id_inventario || '(sin ID)'}</td>
-                    <td class="px-4 py-3">
-                        <div class="max-w-xs truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                    <td class="px-2 py-2 font-mono text-xs ${skuClass}">${p.sku || '(sin SKU)'}</td>
+                    <td class="px-2 py-2 font-mono text-xs ${invClass}">${p.id_inventario || '(sin ID)'}</td>
+                    <td class="px-2 py-2">
+                        <div class="truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
-                    <td class="px-4 py-3 text-right font-medium">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
-                    <td class="px-4 py-3 text-center font-bold ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
-                    <td class="px-4 py-3 text-center">
-                        <span class="px-2 py-1 rounded-full text-xs font-bold ${logClase}">
+                    <td class="px-2 py-2 text-right font-medium text-sm">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
+                    <td class="px-2 py-2 text-center font-bold text-sm ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
+                    <td class="px-2 py-2 text-center">
+                        <span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${logClase}">
                             ${p.tipo_logistica || '-'}
                         </span>
                     </td>
-                    <td class="px-4 py-3 text-center">
-                        <span class="px-2 py-1 rounded-full text-xs font-bold ${estClase}">
+                    <td class="px-2 py-2 text-center">
+                        <span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${estClase}">
                             ${estTexto}
                         </span>
                     </td>
-                    <td class="px-4 py-3 text-center">
+                    <td class="px-2 py-2 text-center">
                         <div class="flex items-center justify-center gap-1">
                             <button onclick="moduloPublicaciones.editarPublicacion('${p.id_publicacion}')"
-                                    class="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                    class="p-1.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
                                     title="Editar SKU / Inventory ID">
-                                <i class="fas fa-edit"></i>
+                                <i class="fas fa-edit text-xs"></i>
                             </button>
                             <button onclick="moduloPublicaciones.confirmarEliminar('${p.id_publicacion}')"
-                                    class="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                    class="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
                                     title="Eliminar publicación de la base de datos">
-                                <i class="fas fa-trash"></i>
+                                <i class="fas fa-trash text-xs"></i>
                             </button>
                         </div>
                     </td>
@@ -511,6 +515,23 @@ export const moduloPublicaciones = {
             btnGuardar.disabled = false;
             btnGuardar.innerHTML = '<i class="fas fa-save"></i> Guardar';
         }
+    },
+
+    // ============================================
+    // GENERAR SLUG: Crear URL amigable desde título
+    // ============================================
+    generarSlug: (titulo) => {
+        if (!titulo) return 'producto';
+
+        return titulo
+            .toLowerCase()
+            .normalize('NFD')                          // Separar acentos
+            .replace(/[\u0300-\u036f]/g, '')           // Eliminar acentos
+            .replace(/[^a-z0-9\s-]/g, '')              // Solo letras, números, espacios y guiones
+            .replace(/\s+/g, '-')                      // Espacios a guiones
+            .replace(/-+/g, '-')                       // Múltiples guiones a uno
+            .replace(/^-|-$/g, '')                     // Eliminar guiones al inicio/fin
+            .substring(0, 60);                         // Limitar longitud
     },
 
     // ============================================
