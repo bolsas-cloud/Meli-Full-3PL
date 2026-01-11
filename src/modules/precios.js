@@ -387,7 +387,7 @@ export const moduloPrecios = {
     },
 
     // ============================================
-    // CARGAR HISTORIAL: Obtiene precios desde órdenes
+    // CARGAR HISTORIAL: Obtiene precios desde órdenes + publicaciones
     // ============================================
     cargarHistorial: async () => {
         const tbody = document.getElementById('tabla-historial');
@@ -407,16 +407,31 @@ export const moduloPrecios = {
             const fechaInicio = new Date();
             fechaInicio.setMonth(fechaInicio.getMonth() - filtroHistorial.periodo);
 
-            // Obtener órdenes del período
-            const { data: ordenes, error } = await supabase
-                .from('ordenes_meli')
-                .select('id_item, titulo_item, precio_unitario, fecha_creacion')
-                .gte('fecha_creacion', fechaInicio.toISOString())
-                .order('fecha_creacion', { ascending: true });
+            // Consultas en paralelo: órdenes históricas + precios actuales de publicaciones
+            const [ordenesRes, publicacionesRes] = await Promise.all([
+                supabase
+                    .from('ordenes_meli')
+                    .select('id_item, titulo_item, precio_unitario, fecha_creacion')
+                    .gte('fecha_creacion', fechaInicio.toISOString())
+                    .order('fecha_creacion', { ascending: true }),
+                supabase
+                    .from('publicaciones_meli')
+                    .select('id_publicacion, precio, titulo')
+            ]);
 
-            if (error) throw error;
+            if (ordenesRes.error) throw ordenesRes.error;
+            if (publicacionesRes.error) throw publicacionesRes.error;
 
-            // Agrupar por producto
+            const ordenes = ordenesRes.data || [];
+            const publicaciones = publicacionesRes.data || [];
+
+            // Crear mapa de precios actuales por id_publicacion
+            const preciosActuales = {};
+            publicaciones.forEach(pub => {
+                preciosActuales[pub.id_publicacion] = parseFloat(pub.precio) || 0;
+            });
+
+            // Agrupar órdenes por producto
             const productosPorItem = {};
 
             ordenes.forEach(orden => {
@@ -440,7 +455,10 @@ export const moduloPrecios = {
             historialData = Object.values(productosPorItem).map(prod => {
                 const preciosOrdenados = prod.precios.sort((a, b) => a.fecha - b.fecha);
                 const precioInicial = preciosOrdenados[0]?.precio || 0;
-                const precioActual = preciosOrdenados[preciosOrdenados.length - 1]?.precio || 0;
+
+                // Precio actual: de la publicación, no de la última venta
+                const precioActual = preciosActuales[prod.id_item] || preciosOrdenados[preciosOrdenados.length - 1]?.precio || 0;
+
                 const variacion = precioInicial > 0 ? ((precioActual - precioInicial) / precioInicial * 100) : 0;
 
                 // Obtener puntos únicos para el sparkline (agrupar por fecha)
@@ -449,6 +467,10 @@ export const moduloPrecios = {
                     const dia = p.fecha.toISOString().split('T')[0];
                     preciosPorDia[dia] = p.precio;
                 });
+                // Agregar precio actual como último punto del sparkline
+                const hoy = new Date().toISOString().split('T')[0];
+                preciosPorDia[hoy] = precioActual;
+
                 const puntosSparkline = Object.values(preciosPorDia);
 
                 return {
