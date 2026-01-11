@@ -53,6 +53,7 @@ export const moduloPublicaciones = {
                                 <option value="active">Activas</option>
                                 <option value="paused">Pausadas</option>
                                 <option value="closed">Cerradas</option>
+                                <option value="no_encontrada">No encontradas en ML</option>
                             </select>
 
                             <!-- Filtro por logística -->
@@ -326,12 +327,14 @@ export const moduloPublicaciones = {
             const estadoColor = {
                 'active': 'bg-green-100 text-green-800',
                 'paused': 'bg-yellow-100 text-yellow-800',
-                'closed': 'bg-red-100 text-red-800'
+                'closed': 'bg-red-100 text-red-800',
+                'no_encontrada': 'bg-purple-100 text-purple-800'
             };
             const estadoLabel = {
                 'active': 'Activa',
                 'paused': 'Pausada',
-                'closed': 'Cerrada'
+                'closed': 'Cerrada',
+                'no_encontrada': 'No encontrada'
             };
             const estClase = estadoColor[p.estado] || 'bg-gray-100 text-gray-600';
             const estTexto = estadoLabel[p.estado] || p.estado || '-';
@@ -548,7 +551,16 @@ export const moduloPublicaciones = {
             if (error) throw error;
 
             if (data?.success) {
-                mostrarNotificacion(`Sincronizado: ${data.updated || 0} publicaciones actualizadas`, 'success');
+                let mensaje = `Sincronizado: ${data.updated || 0} actualizadas`;
+
+                // Mostrar advertencia si hay publicaciones huérfanas
+                if (data.huerfanas > 0) {
+                    mensaje += ` | ${data.huerfanas} no encontradas en ML`;
+                    mostrarNotificacion(mensaje, 'warning');
+                } else {
+                    mostrarNotificacion(mensaje, 'success');
+                }
+
                 await moduloPublicaciones.cargarPublicaciones();
             } else {
                 mostrarNotificacion('Sincronización completada', 'success');

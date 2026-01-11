@@ -145,6 +145,20 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
   try {
     // ============================================
+    // PASO 0: Obtener IDs existentes en Supabase para detectar huérfanas
+    // Solo las que tienen estado active/paused (no las ya marcadas como no_encontrada)
+    // ============================================
+    const { data: existingPubs } = await supabase
+      .from('publicaciones_meli')
+      .select('id_publicacion')
+      .in('estado', ['active', 'paused'])
+
+    const idsEnSupabase = new Set((existingPubs || []).map((p: any) => p.id_publicacion))
+    const idsEncontradosEnML = new Set<string>()
+
+    console.log(`Publicaciones en Supabase (active/paused): ${idsEnSupabase.size}`)
+
+    // ============================================
     // Obtener TODOS los items activos y pausados (no solo fulfillment)
     // Esto replica la lógica de GAS que lee de Hoja 1
     // ============================================
@@ -184,6 +198,9 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
             if (itemResult.code !== 200 || !itemResult.body) continue
 
             const item = itemResult.body
+
+            // Registrar que este ID fue encontrado en ML
+            idsEncontradosEnML.add(item.id)
 
             // ============================================
             // Extraer SKU (igual que antes)
@@ -336,7 +353,46 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
       if (offset >= (data.paging?.total || 0)) break
     }
 
-    return { success: true, updated }
+    // ============================================
+    // PASO FINAL: Marcar publicaciones huérfanas
+    // Las que estaban en Supabase pero NO aparecieron en ML
+    // ============================================
+    const idsHuerfanas: string[] = []
+    for (const id of idsEnSupabase) {
+      if (!idsEncontradosEnML.has(id)) {
+        idsHuerfanas.push(id)
+      }
+    }
+
+    let marcadasHuerfanas = 0
+    if (idsHuerfanas.length > 0) {
+      console.log(`Publicaciones huérfanas detectadas: ${idsHuerfanas.length}`)
+      console.log(`IDs: ${idsHuerfanas.join(', ')}`)
+
+      // Marcar como "no_encontrada" en Supabase
+      const { error: updateError } = await supabase
+        .from('publicaciones_meli')
+        .update({
+          estado: 'no_encontrada',
+          ultima_sync: new Date().toISOString()
+        })
+        .in('id_publicacion', idsHuerfanas)
+
+      if (!updateError) {
+        marcadasHuerfanas = idsHuerfanas.length
+      } else {
+        console.error('Error marcando huérfanas:', updateError)
+      }
+    }
+
+    console.log(`Sync completado - Actualizadas: ${updated}, Huérfanas: ${marcadasHuerfanas}`)
+
+    return {
+      success: true,
+      updated,
+      huerfanas: marcadasHuerfanas,
+      totalEnML: idsEncontradosEnML.size
+    }
 
   } catch (error) {
     console.error('Error en syncInventory:', error)
