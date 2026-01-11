@@ -83,13 +83,13 @@ export const moduloPublicaciones = {
                 <!-- Tabla de publicaciones -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
+                        <table class="w-full table-fixed divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-32">ID Pub.</th>
                                     <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-36">SKU</th>
                                     <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-24">Inv. ID</th>
-                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
+                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase max-w-xs">Título</th>
                                     <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-24">Precio</th>
                                     <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16">Stock</th>
                                     <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Logística</th>
@@ -357,7 +357,7 @@ export const moduloPublicaciones = {
                     </td>
                     <td class="px-2 py-2 font-mono text-xs ${skuClass}">${p.sku || '(sin SKU)'}</td>
                     <td class="px-2 py-2 font-mono text-xs ${invClass}">${p.id_inventario || '(sin ID)'}</td>
-                    <td class="px-2 py-2">
+                    <td class="px-2 py-2 max-w-xs">
                         <div class="truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
                     <td class="px-2 py-2 text-right font-medium text-sm">${p.precio ? formatearMoneda(p.precio) : '-'}</td>

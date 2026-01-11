@@ -141,8 +141,20 @@ SELECT * FROM cron.job;
 | Accion | Descripcion |
 |--------|-------------|
 | `sync-orders` | Solo sincroniza ordenes (con neto recibido) |
-| `sync-inventory` | Solo sincroniza stock de Full |
-| `sync-all` | Sincroniza ambos |
+| `sync-inventory` | Sincroniza stock de Full + detecta publicaciones huerfanas |
+| `sync-prices` | Sincroniza precios y comisiones de ML |
+| `sync-ads` | Sincroniza costos de publicidad |
+| `sync-all` | Sincroniza inventory + orders |
+
+### Deteccion de Publicaciones Huerfanas (v1.4.0)
+
+Al ejecutar `sync-inventory`, el sistema:
+1. Obtiene todos los IDs de publicaciones activas/pausadas en Supabase
+2. Consulta la API de ML por items activos/pausados
+3. Marca como `estado: 'no_encontrada'` las que estan en Supabase pero NO en ML
+4. Retorna `{ updated, huerfanas, totalEnML }` en la respuesta
+
+Esto permite identificar publicaciones eliminadas o cerradas en ML para limpieza manual.
 
 ---
 
@@ -177,4 +189,4 @@ npx supabase functions logs sync-meli
 
 ---
 
-*Ultima actualizacion: Diciembre 2025*
+*Ultima actualizacion: Enero 2026*
