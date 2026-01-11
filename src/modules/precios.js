@@ -416,7 +416,8 @@ export const moduloPrecios = {
                     .order('fecha_creacion', { ascending: true }),
                 supabase
                     .from('publicaciones_meli')
-                    .select('id_publicacion, precio, titulo')
+                    .select('id_publicacion, precio, titulo, estado')
+                    .in('estado', ['active', 'paused']) // Solo activas y pausadas
             ]);
 
             if (ordenesRes.error) throw ordenesRes.error;
@@ -651,6 +652,7 @@ export const moduloPrecios = {
                 supabase
                     .from('publicaciones_meli')
                     .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica')
+                    .in('estado', ['active', 'paused']) // Solo activas y pausadas, no cerradas
                     .order('titulo'),
                 supabase
                     .from('v_precios_fallos_pendientes')

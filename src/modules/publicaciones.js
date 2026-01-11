@@ -12,7 +12,8 @@ import { mostrarNotificacion, formatearMoneda } from '../utils.js';
 let publicaciones = [];
 let filtros = {
     busqueda: '',
-    tipo_logistica: 'todos'
+    tipo_logistica: 'todos',
+    estado: 'todos'
 };
 let paginaActual = 1;
 const porPagina = 50;
@@ -44,6 +45,15 @@ export const moduloPublicaciones = {
                                        placeholder="Buscar SKU, título, ID..."
                                        class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-transparent w-64">
                             </div>
+
+                            <!-- Filtro por estado -->
+                            <select id="filtro-estado"
+                                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
+                                <option value="todos">Todo estado</option>
+                                <option value="active">Activas</option>
+                                <option value="paused">Pausadas</option>
+                                <option value="closed">Cerradas</option>
+                            </select>
 
                             <!-- Filtro por logística -->
                             <select id="filtro-logistica"
@@ -82,12 +92,13 @@ export const moduloPublicaciones = {
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Precio</th>
                                     <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Stock Full</th>
                                     <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
+                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
                                     <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-publicaciones" class="divide-y divide-gray-100">
                                 <tr>
-                                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
+                                    <td colspan="9" class="px-4 py-12 text-center text-gray-500">
                                         <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
                                         <p>Cargando publicaciones...</p>
                                     </td>
@@ -144,6 +155,47 @@ export const moduloPublicaciones = {
                     </div>
                 </div>
             </div>
+
+            <!-- Modal de confirmación de eliminación -->
+            <div id="modal-eliminar-pub" class="fixed inset-0 z-50 hidden" aria-modal="true">
+                <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="moduloPublicaciones.cerrarModalEliminar()"></div>
+                <div class="fixed inset-0 z-10 overflow-y-auto p-4 flex items-center justify-center">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fade-in">
+                        <div class="bg-red-600 text-white px-6 py-4 flex items-center justify-between rounded-t-xl">
+                            <h3 class="font-bold text-lg">
+                                <i class="fas fa-exclamation-triangle mr-2"></i>
+                                Eliminar Publicación
+                            </h3>
+                            <button onclick="moduloPublicaciones.cerrarModalEliminar()" class="text-white/80 hover:text-white">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        <div class="p-6">
+                            <p class="text-gray-700 mb-4">¿Estás seguro de que querés eliminar esta publicación de la base de datos?</p>
+                            <div id="info-pub-eliminar" class="bg-gray-50 rounded-lg p-4 mb-4">
+                                <!-- Se llena dinámicamente -->
+                            </div>
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                Esta acción solo elimina el registro local. No afecta la publicación en Mercado Libre.
+                            </div>
+                            <input type="hidden" id="eliminar-id-pub" value="">
+                        </div>
+                        <div class="bg-gray-50 px-6 py-4 flex justify-end gap-3 rounded-b-xl">
+                            <button onclick="moduloPublicaciones.cerrarModalEliminar()"
+                                    class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                                Cancelar
+                            </button>
+                            <button onclick="moduloPublicaciones.eliminarPublicacion()"
+                                    id="btn-confirmar-eliminar"
+                                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2">
+                                <i class="fas fa-trash"></i>
+                                Eliminar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
 
         // Cargar publicaciones
@@ -162,6 +214,12 @@ export const moduloPublicaciones = {
             moduloPublicaciones.pintarTabla();
         });
 
+        document.getElementById('filtro-estado').addEventListener('change', (e) => {
+            filtros.estado = e.target.value;
+            paginaActual = 1;
+            moduloPublicaciones.pintarTabla();
+        });
+
         // Exponer módulo en window
         window.moduloPublicaciones = moduloPublicaciones;
     },
@@ -173,7 +231,7 @@ export const moduloPublicaciones = {
         const tbody = document.getElementById('tabla-publicaciones');
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="px-4 py-12 text-center text-gray-500">
+                <td colspan="9" class="px-4 py-12 text-center text-gray-500">
                     <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
                     <p>Cargando publicaciones...</p>
                 </td>
@@ -198,7 +256,7 @@ export const moduloPublicaciones = {
             console.error('Error cargando publicaciones:', error);
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-4 py-12 text-center text-red-500">
+                    <td colspan="9" class="px-4 py-12 text-center text-red-500">
                         <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
                         <p>Error al cargar publicaciones</p>
                     </td>
@@ -224,7 +282,10 @@ export const moduloPublicaciones = {
             const matchLogistica = filtros.tipo_logistica === 'todos' ||
                 p.tipo_logistica === filtros.tipo_logistica;
 
-            return matchBusqueda && matchLogistica;
+            const matchEstado = filtros.estado === 'todos' ||
+                p.estado === filtros.estado;
+
+            return matchBusqueda && matchLogistica && matchEstado;
         });
 
         // Paginación
@@ -244,7 +305,7 @@ export const moduloPublicaciones = {
         if (pubsPagina.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
+                    <td colspan="9" class="px-4 py-12 text-center text-gray-500">
                         <i class="fas fa-inbox fa-2x mb-2"></i>
                         <p>No se encontraron publicaciones</p>
                     </td>
@@ -260,6 +321,20 @@ export const moduloPublicaciones = {
                 'self_service': 'bg-gray-100 text-gray-800'
             };
             const logClase = logisticaColor[p.tipo_logistica] || 'bg-gray-100 text-gray-600';
+
+            // Colores para estado
+            const estadoColor = {
+                'active': 'bg-green-100 text-green-800',
+                'paused': 'bg-yellow-100 text-yellow-800',
+                'closed': 'bg-red-100 text-red-800'
+            };
+            const estadoLabel = {
+                'active': 'Activa',
+                'paused': 'Pausada',
+                'closed': 'Cerrada'
+            };
+            const estClase = estadoColor[p.estado] || 'bg-gray-100 text-gray-600';
+            const estTexto = estadoLabel[p.estado] || p.estado || '-';
 
             // Resaltar si falta SKU o Inventory ID
             const skuClass = p.sku ? '' : 'text-red-500 italic';
@@ -286,11 +361,23 @@ export const moduloPublicaciones = {
                         </span>
                     </td>
                     <td class="px-4 py-3 text-center">
-                        <button onclick="moduloPublicaciones.editarPublicacion('${p.id_publicacion}')"
-                                class="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                                title="Editar SKU / Inventory ID">
-                            <i class="fas fa-edit"></i>
-                        </button>
+                        <span class="px-2 py-1 rounded-full text-xs font-bold ${estClase}">
+                            ${estTexto}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button onclick="moduloPublicaciones.editarPublicacion('${p.id_publicacion}')"
+                                    class="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                    title="Editar SKU / Inventory ID">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="moduloPublicaciones.confirmarEliminar('${p.id_publicacion}')"
+                                    class="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                    title="Eliminar publicación de la base de datos">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -315,7 +402,9 @@ export const moduloPublicaciones = {
                 (p.id_publicacion || '').toLowerCase().includes(filtros.busqueda);
             const matchLogistica = filtros.tipo_logistica === 'todos' ||
                 p.tipo_logistica === filtros.tipo_logistica;
-            return matchBusqueda && matchLogistica;
+            const matchEstado = filtros.estado === 'todos' ||
+                p.estado === filtros.estado;
+            return matchBusqueda && matchLogistica && matchEstado;
         });
 
         const totalPaginas = Math.ceil(pubsFiltradas.length / porPagina);
@@ -448,6 +537,73 @@ export const moduloPublicaciones = {
         } catch (error) {
             console.error('Error sincronizando:', error);
             mostrarNotificacion('Error al sincronizar con ML', 'error');
+        }
+    },
+
+    // ============================================
+    // ELIMINAR: Abrir modal de confirmación
+    // ============================================
+    confirmarEliminar: (idPub) => {
+        const pub = publicaciones.find(p => p.id_publicacion === idPub);
+        if (!pub) {
+            mostrarNotificacion('Publicación no encontrada', 'error');
+            return;
+        }
+
+        document.getElementById('eliminar-id-pub').value = idPub;
+        document.getElementById('info-pub-eliminar').innerHTML = `
+            <div class="space-y-2">
+                <p class="text-sm"><span class="font-medium text-gray-600">ID:</span> <span class="font-mono">${pub.id_publicacion}</span></p>
+                <p class="text-sm"><span class="font-medium text-gray-600">SKU:</span> <span class="font-mono">${pub.sku || '(sin SKU)'}</span></p>
+                <p class="text-sm"><span class="font-medium text-gray-600">Título:</span> ${pub.titulo || '-'}</p>
+            </div>
+        `;
+
+        document.getElementById('modal-eliminar-pub').classList.remove('hidden');
+    },
+
+    // ============================================
+    // MODAL ELIMINAR: Cerrar
+    // ============================================
+    cerrarModalEliminar: () => {
+        document.getElementById('modal-eliminar-pub').classList.add('hidden');
+    },
+
+    // ============================================
+    // ELIMINAR: Ejecutar eliminación
+    // ============================================
+    eliminarPublicacion: async () => {
+        const idPub = document.getElementById('eliminar-id-pub').value;
+        if (!idPub) return;
+
+        const btnEliminar = document.getElementById('btn-confirmar-eliminar');
+        btnEliminar.disabled = true;
+        btnEliminar.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Eliminando...';
+
+        try {
+            const { error } = await supabase
+                .from('publicaciones_meli')
+                .delete()
+                .eq('id_publicacion', idPub);
+
+            if (error) throw error;
+
+            // Eliminar de memoria
+            publicaciones = publicaciones.filter(p => p.id_publicacion !== idPub);
+
+            mostrarNotificacion('Publicación eliminada correctamente', 'success');
+            moduloPublicaciones.cerrarModalEliminar();
+            moduloPublicaciones.pintarTabla();
+
+            // Actualizar contador
+            document.getElementById('contador-publicaciones').textContent = `(${publicaciones.length} publicaciones)`;
+
+        } catch (error) {
+            console.error('Error eliminando:', error);
+            mostrarNotificacion('Error al eliminar publicación', 'error');
+        } finally {
+            btnEliminar.disabled = false;
+            btnEliminar.innerHTML = '<i class="fas fa-trash"></i> Eliminar';
         }
     }
 };
