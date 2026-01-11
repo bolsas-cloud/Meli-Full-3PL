@@ -3,6 +3,7 @@
 // ============================================
 // Permite visualizar, modificar y actualizar
 // precios de publicaciones en Mercado Libre
+// + Historial de evolución de precios
 // ============================================
 
 import { supabase } from '../config.js';
@@ -22,17 +23,126 @@ let pctComisionPromedio = 30; // Default 30%, se actualiza con datos reales
 let tipoModificacionActual = 'porcentaje'; // Para registrar en fallos
 let valorModificacionActual = 0; // Para registrar en fallos
 
+// Estado para historial de precios
+let tabActual = 'gestion'; // 'gestion' | 'historial'
+let historialData = [];
+let filtroHistorial = {
+    periodo: 3, // meses
+    busqueda: ''
+};
+
 export const moduloPrecios = {
 
     // ============================================
-    // RENDER: Dibuja la interfaz
+    // RENDER: Dibuja la interfaz con tabs
     // ============================================
     render: async (contenedor) => {
         contenedor.innerHTML = `
             <div class="max-w-7xl mx-auto space-y-6">
 
-                <!-- Panel de Acciones -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <!-- Tabs de navegación -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="flex border-b border-gray-200">
+                        <button id="tab-gestion" onclick="moduloPrecios.cambiarTab('gestion')"
+                                class="tab-btn flex-1 px-6 py-4 text-sm font-medium transition-colors border-b-2 border-brand text-brand bg-brand/5">
+                            <i class="fas fa-tags mr-2"></i>
+                            Gestión de Precios
+                        </button>
+                        <button id="tab-historial" onclick="moduloPrecios.cambiarTab('historial')"
+                                class="tab-btn flex-1 px-6 py-4 text-sm font-medium transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50">
+                            <i class="fas fa-chart-line mr-2"></i>
+                            Historial de Precios
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Contenido de tabs -->
+                <div id="contenido-tabs">
+                    <!-- Se llena dinámicamente -->
+                </div>
+
+            </div>
+        `;
+
+        // Agregar estilos
+        moduloPrecios.agregarEstilos();
+
+        // Exponer en window para eventos onclick
+        window.moduloPrecios = moduloPrecios;
+
+        // Renderizar tab activa
+        await moduloPrecios.renderTabActual();
+    },
+
+    // ============================================
+    // CAMBIAR TAB
+    // ============================================
+    cambiarTab: async (tab) => {
+        tabActual = tab;
+
+        // Actualizar estilos de tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('border-brand', 'text-brand', 'bg-brand/5');
+            btn.classList.add('border-transparent', 'text-gray-500');
+        });
+
+        const tabActiva = document.getElementById(`tab-${tab}`);
+        if (tabActiva) {
+            tabActiva.classList.remove('border-transparent', 'text-gray-500');
+            tabActiva.classList.add('border-brand', 'text-brand', 'bg-brand/5');
+        }
+
+        await moduloPrecios.renderTabActual();
+    },
+
+    // ============================================
+    // RENDER TAB ACTUAL
+    // ============================================
+    renderTabActual: async () => {
+        const contenedor = document.getElementById('contenido-tabs');
+
+        if (tabActual === 'gestion') {
+            await moduloPrecios.renderGestionPrecios(contenedor);
+        } else {
+            await moduloPrecios.renderHistorialPrecios(contenedor);
+        }
+    },
+
+    // ============================================
+    // AGREGAR ESTILOS
+    // ============================================
+    agregarEstilos: () => {
+        if (document.getElementById('estilos-precios')) return;
+
+        const style = document.createElement('style');
+        style.id = 'estilos-precios';
+        style.textContent = `
+            .btn-filtro-estado { background: #f3f4f6; color: #6b7280; }
+            .btn-filtro-estado:hover { background: #e5e7eb; }
+            .btn-filtro-estado.active { background: #4eab87; color: white; }
+            .btn-filtro-fallos { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+            .btn-filtro-fallos:hover { background: #fee2e2; }
+            .btn-filtro-fallos.active { background: #dc2626; color: white; border-color: #dc2626; }
+            .row-con-fallo { background: #fef2f2 !important; }
+            .row-con-fallo:hover { background: #fee2e2 !important; }
+            .btn-periodo { background: #f3f4f6; color: #6b7280; }
+            .btn-periodo:hover { background: #e5e7eb; }
+            .btn-periodo.active { background: #4eab87; color: white; }
+            .sparkline { display: inline-block; vertical-align: middle; }
+            .variacion-positiva { color: #16a34a; }
+            .variacion-negativa { color: #dc2626; }
+            .variacion-neutral { color: #6b7280; }
+        `;
+        document.head.appendChild(style);
+    },
+
+    // ============================================
+    // RENDER: Vista de Gestión de Precios
+    // ============================================
+    renderGestionPrecios: async (contenedor) => {
+        contenedor.innerHTML = `
+            <!-- Panel de Acciones -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <div class="flex flex-wrap items-center justify-between gap-4">
 
                         <!-- Búsqueda y Filtros -->
@@ -133,25 +243,10 @@ export const moduloPrecios = {
                     </div>
                 </div>
 
-            </div>
         `;
-
-        // Agregar estilos para los botones de filtro
-        const style = document.createElement('style');
-        style.textContent = `
-            .btn-filtro-estado { background: #f3f4f6; color: #6b7280; }
-            .btn-filtro-estado:hover { background: #e5e7eb; }
-            .btn-filtro-estado.active { background: #4eab87; color: white; }
-            .btn-filtro-fallos { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-            .btn-filtro-fallos:hover { background: #fee2e2; }
-            .btn-filtro-fallos.active { background: #dc2626; color: white; border-color: #dc2626; }
-            .row-con-fallo { background: #fef2f2 !important; }
-            .row-con-fallo:hover { background: #fee2e2 !important; }
-        `;
-        document.head.appendChild(style);
 
         // Configurar eventos
-        document.getElementById('buscar-producto').addEventListener('input', (e) => {
+        document.getElementById('buscar-producto')?.addEventListener('input', (e) => {
             filtros.busqueda = e.target.value.toLowerCase();
             moduloPrecios.pintarTabla();
         });
@@ -173,11 +268,9 @@ export const moduloPrecios = {
             const isActive = btnFallos.classList.contains('active');
 
             if (isActive) {
-                // Desactivar filtro de fallos
                 btnFallos.classList.remove('active');
                 filtros.fallos = false;
             } else {
-                // Activar filtro de fallos
                 document.querySelectorAll('.btn-filtro-estado').forEach(b => b.classList.remove('active'));
                 btnFallos.classList.add('active');
                 filtros.fallos = true;
@@ -186,11 +279,322 @@ export const moduloPrecios = {
             moduloPrecios.pintarTabla();
         });
 
-        // Exponer en window para eventos onclick
-        window.moduloPrecios = moduloPrecios;
-
         // Cargar datos
         await moduloPrecios.cargarProductos();
+    },
+
+    // ============================================
+    // RENDER: Vista de Historial de Precios
+    // ============================================
+    renderHistorialPrecios: async (contenedor) => {
+        contenedor.innerHTML = `
+            <!-- Panel de Filtros -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <!-- Filtros de período -->
+                    <div class="flex items-center gap-4">
+                        <span class="text-sm font-medium text-gray-700">Período:</span>
+                        <div class="flex gap-2">
+                            <button class="btn-periodo px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-meses="1">
+                                1 Mes
+                            </button>
+                            <button class="btn-periodo active px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-meses="3">
+                                3 Meses
+                            </button>
+                            <button class="btn-periodo px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-meses="6">
+                                6 Meses
+                            </button>
+                            <button class="btn-periodo px-3 py-2 rounded-lg text-sm font-medium transition-colors" data-meses="12">
+                                12 Meses
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Búsqueda -->
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                        <input type="text" id="buscar-historial" placeholder="Buscar producto..."
+                               class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-transparent w-64">
+                    </div>
+                </div>
+
+                <!-- Resumen -->
+                <div class="mt-4 pt-4 border-t border-gray-200 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="stat-productos">-</div>
+                        <div class="text-xs text-gray-500">Productos con ventas</div>
+                    </div>
+                    <div class="bg-green-50 rounded-lg p-3 text-center">
+                        <div class="text-2xl font-bold text-green-600" id="stat-aumentaron">-</div>
+                        <div class="text-xs text-gray-500">Aumentaron precio</div>
+                    </div>
+                    <div class="bg-red-50 rounded-lg p-3 text-center">
+                        <div class="text-2xl font-bold text-red-600" id="stat-bajaron">-</div>
+                        <div class="text-xs text-gray-500">Bajaron precio</div>
+                    </div>
+                    <div class="bg-blue-50 rounded-lg p-3 text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="stat-variacion">-</div>
+                        <div class="text-xs text-gray-500">Variación promedio</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Historial -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Precio Inicial</th>
+                                <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Precio Actual</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Variación</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Evolución</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Ventas</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-historial" class="divide-y divide-gray-100">
+                            <tr>
+                                <td colspan="6" class="px-4 py-12 text-center text-gray-500">
+                                    <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                                    <p>Cargando historial de precios...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        // Configurar eventos de filtro de período
+        document.querySelectorAll('.btn-periodo').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.btn-periodo').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                filtroHistorial.periodo = parseInt(btn.dataset.meses);
+                moduloPrecios.cargarHistorial();
+            });
+        });
+
+        // Evento de búsqueda
+        document.getElementById('buscar-historial')?.addEventListener('input', (e) => {
+            filtroHistorial.busqueda = e.target.value.toLowerCase();
+            moduloPrecios.pintarTablaHistorial();
+        });
+
+        // Cargar datos
+        await moduloPrecios.cargarHistorial();
+    },
+
+    // ============================================
+    // CARGAR HISTORIAL: Obtiene precios desde órdenes
+    // ============================================
+    cargarHistorial: async () => {
+        const tbody = document.getElementById('tabla-historial');
+        if (!tbody) return;
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="px-4 py-12 text-center text-gray-500">
+                    <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                    <p>Cargando historial de precios...</p>
+                </td>
+            </tr>
+        `;
+
+        try {
+            // Calcular fecha de inicio según período
+            const fechaInicio = new Date();
+            fechaInicio.setMonth(fechaInicio.getMonth() - filtroHistorial.periodo);
+
+            // Obtener órdenes del período
+            const { data: ordenes, error } = await supabase
+                .from('ordenes_meli')
+                .select('id_item, titulo_item, precio_unitario, fecha_creacion')
+                .gte('fecha_creacion', fechaInicio.toISOString())
+                .order('fecha_creacion', { ascending: true });
+
+            if (error) throw error;
+
+            // Agrupar por producto
+            const productosPorItem = {};
+
+            ordenes.forEach(orden => {
+                const key = orden.id_item;
+                if (!productosPorItem[key]) {
+                    productosPorItem[key] = {
+                        id_item: orden.id_item,
+                        titulo: orden.titulo_item,
+                        precios: [],
+                        ventas: 0
+                    };
+                }
+                productosPorItem[key].precios.push({
+                    precio: parseFloat(orden.precio_unitario),
+                    fecha: new Date(orden.fecha_creacion)
+                });
+                productosPorItem[key].ventas++;
+            });
+
+            // Calcular datos para cada producto
+            historialData = Object.values(productosPorItem).map(prod => {
+                const preciosOrdenados = prod.precios.sort((a, b) => a.fecha - b.fecha);
+                const precioInicial = preciosOrdenados[0]?.precio || 0;
+                const precioActual = preciosOrdenados[preciosOrdenados.length - 1]?.precio || 0;
+                const variacion = precioInicial > 0 ? ((precioActual - precioInicial) / precioInicial * 100) : 0;
+
+                // Obtener puntos únicos para el sparkline (agrupar por fecha)
+                const preciosPorDia = {};
+                preciosOrdenados.forEach(p => {
+                    const dia = p.fecha.toISOString().split('T')[0];
+                    preciosPorDia[dia] = p.precio;
+                });
+                const puntosSparkline = Object.values(preciosPorDia);
+
+                return {
+                    id_item: prod.id_item,
+                    titulo: prod.titulo,
+                    precioInicial,
+                    precioActual,
+                    variacion,
+                    ventas: prod.ventas,
+                    sparklineData: puntosSparkline
+                };
+            });
+
+            // Ordenar por variación descendente (mayor aumento primero)
+            historialData.sort((a, b) => b.variacion - a.variacion);
+
+            // Actualizar estadísticas
+            moduloPrecios.actualizarEstadisticasHistorial();
+
+            // Pintar tabla
+            moduloPrecios.pintarTablaHistorial();
+
+        } catch (error) {
+            console.error('Error cargando historial:', error);
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="px-4 py-12 text-center text-red-500">
+                        <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
+                        <p>Error al cargar historial</p>
+                    </td>
+                </tr>
+            `;
+        }
+    },
+
+    // ============================================
+    // ACTUALIZAR ESTADÍSTICAS DEL HISTORIAL
+    // ============================================
+    actualizarEstadisticasHistorial: () => {
+        const total = historialData.length;
+        const aumentaron = historialData.filter(p => p.variacion > 0).length;
+        const bajaron = historialData.filter(p => p.variacion < 0).length;
+        const variacionPromedio = total > 0
+            ? (historialData.reduce((sum, p) => sum + p.variacion, 0) / total).toFixed(1)
+            : 0;
+
+        document.getElementById('stat-productos').textContent = total;
+        document.getElementById('stat-aumentaron').textContent = aumentaron;
+        document.getElementById('stat-bajaron').textContent = bajaron;
+        document.getElementById('stat-variacion').textContent = `${variacionPromedio > 0 ? '+' : ''}${variacionPromedio}%`;
+    },
+
+    // ============================================
+    // PINTAR TABLA HISTORIAL
+    // ============================================
+    pintarTablaHistorial: () => {
+        const tbody = document.getElementById('tabla-historial');
+        if (!tbody) return;
+
+        // Aplicar filtro de búsqueda
+        let datosFiltrados = historialData;
+        if (filtroHistorial.busqueda) {
+            datosFiltrados = historialData.filter(p =>
+                (p.titulo || '').toLowerCase().includes(filtroHistorial.busqueda) ||
+                (p.id_item || '').toLowerCase().includes(filtroHistorial.busqueda)
+            );
+        }
+
+        if (datosFiltrados.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="px-4 py-12 text-center text-gray-500">
+                        <i class="fas fa-inbox fa-2x mb-2"></i>
+                        <p>No hay datos de ventas en este período</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = datosFiltrados.map(p => {
+            const variacionClase = p.variacion > 0 ? 'variacion-positiva' : (p.variacion < 0 ? 'variacion-negativa' : 'variacion-neutral');
+            const variacionIcono = p.variacion > 0 ? 'fa-arrow-up' : (p.variacion < 0 ? 'fa-arrow-down' : 'fa-minus');
+
+            return `
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-4 py-3">
+                        <div class="text-sm font-medium text-gray-800 truncate max-w-md" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                        <div class="text-xs text-gray-500 font-mono">${p.id_item || '-'}</div>
+                    </td>
+                    <td class="px-4 py-3 text-right font-medium text-gray-600">
+                        ${formatearMoneda(p.precioInicial)}
+                    </td>
+                    <td class="px-4 py-3 text-right font-bold text-gray-800">
+                        ${formatearMoneda(p.precioActual)}
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="inline-flex items-center gap-1 font-bold ${variacionClase}">
+                            <i class="fas ${variacionIcono} text-xs"></i>
+                            ${p.variacion > 0 ? '+' : ''}${p.variacion.toFixed(1)}%
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        ${moduloPrecios.generarSparkline(p.sparklineData, p.variacion)}
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="inline-flex items-center justify-center w-10 h-6 bg-gray-100 rounded text-xs font-medium text-gray-600">
+                            ${p.ventas}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    // ============================================
+    // GENERAR SPARKLINE SVG
+    // ============================================
+    generarSparkline: (data, variacion) => {
+        if (!data || data.length < 2) {
+            return '<span class="text-gray-300 text-xs">Sin datos</span>';
+        }
+
+        const width = 80;
+        const height = 24;
+        const padding = 2;
+
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const range = max - min || 1;
+
+        // Generar puntos del path
+        const points = data.map((value, index) => {
+            const x = padding + (index / (data.length - 1)) * (width - 2 * padding);
+            const y = height - padding - ((value - min) / range) * (height - 2 * padding);
+            return `${x},${y}`;
+        });
+
+        const pathD = `M ${points.join(' L ')}`;
+        const color = variacion >= 0 ? '#16a34a' : '#dc2626';
+
+        return `
+            <svg width="${width}" height="${height}" class="sparkline">
+                <path d="${pathD}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
     },
 
     // ============================================
