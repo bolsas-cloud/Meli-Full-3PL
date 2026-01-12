@@ -53,6 +53,54 @@ Retorna top productos vendidos:
 
 ---
 
+## Analisis Pareto 80/20 (v1.5.0)
+
+Nueva funcionalidad que identifica las publicaciones que generan el 80% de la facturacion.
+
+### Acceso
+
+Dashboard > Tab "Analisis 80/20"
+
+### Componentes
+
+| Componente | Descripcion |
+|------------|-------------|
+| **Grafico Doughnut** | Visualiza distribucion 80/20 de facturacion |
+| **Cards de Resumen** | Total facturado, publicaciones top 80%, resto |
+| **Tabla de Ranking** | Lista completa ordenada por facturacion con % acumulado |
+
+### Funciones RPC Pareto
+
+#### obtener_analisis_pareto(fecha_desde, fecha_hasta)
+
+Retorna listado completo con analisis Pareto:
+- `id_item` - ID publicacion ML
+- `sku` - SKU del producto
+- `titulo` - Nombre del producto
+- `cantidad_vendida` - Unidades vendidas
+- `total_neto` - Facturacion neta
+- `porcentaje_total` - % sobre el total
+- `porcentaje_acumulado` - % acumulado (para identificar corte 80%)
+- `es_top_80` - Boolean indicando si esta en el top 80%
+
+#### obtener_resumen_pareto(fecha_desde, fecha_hasta)
+
+Retorna estadisticas resumidas:
+- `total_facturado` - Facturacion total del periodo
+- `total_publicaciones` - Cantidad de publicaciones con ventas
+- `publicaciones_top_80` - Cantidad en el top 80%
+- `publicaciones_resto` - Cantidad en el resto 20%
+- `facturacion_top_80` - Monto facturado por el top 80%
+- `facturacion_resto` - Monto facturado por el resto
+- `pct_publicaciones_top` - % de publicaciones que son top
+- `pct_facturacion_top` - % de facturacion del top (cercano a 80%)
+
+### Archivo SQL
+
+`supabase/functions_pareto.sql`
+
+---
+
 ## Periodos de Filtro
 
 | Boton | Rango |
@@ -159,4 +207,4 @@ cargarDatosFallback: async () => {
 
 ---
 
-*Ultima actualizacion: Diciembre 2025*
+*Ultima actualizacion: Enero 2026*

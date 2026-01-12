@@ -19,6 +19,12 @@ let ventasDiarias = [];
 let topProductos = [];
 let ultimaActualizacion = null;
 let chartInstance = null;
+let chartParetoInstance = null;
+
+// Estado para tabs y Pareto
+let tabActivo = 'kpis';  // 'kpis' o 'pareto'
+let datosPareto = [];
+let resumenPareto = {};
 
 export const moduloDashboard = {
 
@@ -97,6 +103,27 @@ export const moduloDashboard = {
                         </div>
                     </div>
                 </div>
+
+                <!-- Tabs de navegacion -->
+                <div class="border-b border-gray-200">
+                    <nav class="flex space-x-4" aria-label="Tabs">
+                        <button onclick="moduloDashboard.cambiarTab('kpis')"
+                                class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2"
+                                data-tab="kpis">
+                            <i class="fas fa-chart-line mr-2"></i>
+                            KPIs y Ventas
+                        </button>
+                        <button onclick="moduloDashboard.cambiarTab('pareto')"
+                                class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2"
+                                data-tab="pareto">
+                            <i class="fas fa-chart-pie mr-2"></i>
+                            Analisis 80/20
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- TAB: KPIs y Ventas -->
+                <div id="tab-kpis" class="tab-content space-y-6">
 
                 <!-- KPIs Cards -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="kpis-container">
@@ -188,17 +215,118 @@ export const moduloDashboard = {
                     </div>
                 </div>
 
+                </div><!-- Fin tab-kpis -->
+
+                <!-- TAB: Analisis Pareto 80/20 -->
+                <div id="tab-pareto" class="tab-content space-y-6 hidden">
+
+                    <!-- Resumen y Grafico -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                        <!-- Grafico Doughnut -->
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <i class="fas fa-chart-pie text-brand"></i>
+                                Distribucion 80/20
+                            </h3>
+                            <div class="relative" style="height: 250px;">
+                                <canvas id="chart-pareto"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Cards de Resumen -->
+                        <div class="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                                <p class="text-xs font-bold text-gray-400 uppercase">Total Facturado</p>
+                                <p class="text-2xl font-bold text-gray-800 mt-2" id="pareto-total">-</p>
+                                <p class="text-xs text-gray-500 mt-1">en el periodo</p>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                                <p class="text-xs font-bold text-gray-400 uppercase">Publicaciones</p>
+                                <p class="text-2xl font-bold text-gray-800 mt-2" id="pareto-pubs-total">-</p>
+                                <p class="text-xs text-gray-500 mt-1">con ventas</p>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
+                                <p class="text-xs font-bold text-green-600 uppercase">Top 80%</p>
+                                <p class="text-2xl font-bold text-green-600 mt-2" id="pareto-top-count">-</p>
+                                <p class="text-xs text-gray-500 mt-1" id="pareto-top-pct">- publicaciones</p>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-gray-400">
+                                <p class="text-xs font-bold text-gray-400 uppercase">Resto 20%</p>
+                                <p class="text-2xl font-bold text-gray-500 mt-2" id="pareto-resto-count">-</p>
+                                <p class="text-xs text-gray-500 mt-1" id="pareto-resto-pct">- publicaciones</p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Tabla Detallada -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+                            <h3 class="font-bold text-gray-800 flex items-center gap-2">
+                                <i class="fas fa-list-ol text-brand"></i>
+                                Ranking por Facturacion
+                            </h3>
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded">
+                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                                    Top 80%
+                                </span>
+                                <span class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded">
+                                    <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                                    Resto
+                                </span>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+                            <table class="min-w-full divide-y divide-gray-100">
+                                <thead class="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">#</th>
+                                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
+                                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cant</th>
+                                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Neto</th>
+                                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">% Total</th>
+                                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">% Acum</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabla-pareto" class="divide-y divide-gray-100 text-sm">
+                                    <tr>
+                                        <td colspan="7" class="px-4 py-8 text-center text-gray-400">
+                                            <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                                            <p>Cargando analisis...</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div><!-- Fin tab-pareto -->
+
             </div>
         `;
 
-        // Estilos para botones de filtro
+        // Estilos para botones de filtro y tabs
         const style = document.createElement('style');
         style.textContent = `
             .btn-filtro { border-color: #e5e7eb; background: white; color: #374151; }
             .btn-filtro:hover { background: #f3f4f6; }
             .btn-filtro.active { background: #4EAB87; color: white; border-color: #4EAB87; }
+
+            .tab-btn { border-color: transparent; color: #6b7280; background: transparent; }
+            .tab-btn:hover { color: #374151; background: #f3f4f6; }
+            .tab-btn.active { color: #4EAB87; border-color: #4EAB87; background: #f0f9f6; }
+            .tab-content.hidden { display: none; }
         `;
         document.head.appendChild(style);
+
+        // Inicializar tabs
+        moduloDashboard.actualizarEstadoTabs();
 
         // Cargar datos
         await moduloDashboard.cargarDatos();
@@ -641,9 +769,18 @@ export const moduloDashboard = {
         document.getElementById('info-periodo').textContent =
             `Mostrando: ${formatearFecha(desde)} - ${formatearFecha(hasta)}`;
 
+        // Limpiar datos Pareto para forzar recarga
+        datosPareto = [];
+        resumenPareto = {};
+
         // Recargar datos
         mostrarNotificacion('Cargando datos...', 'info');
         await moduloDashboard.cargarDatos();
+
+        // Si estamos en tab Pareto, recargar esos datos
+        if (tabActivo === 'pareto') {
+            await moduloDashboard.cargarDatosPareto();
+        }
     },
 
     // ============================================
@@ -675,9 +812,18 @@ export const moduloDashboard = {
         document.getElementById('info-periodo').textContent =
             `Mostrando: ${formatearFecha(desde)} - ${formatearFecha(hasta)}`;
 
+        // Limpiar datos Pareto para forzar recarga
+        datosPareto = [];
+        resumenPareto = {};
+
         // Recargar datos
         mostrarNotificacion('Cargando datos...', 'info');
         await moduloDashboard.cargarDatos();
+
+        // Si estamos en tab Pareto, recargar esos datos
+        if (tabActivo === 'pareto') {
+            await moduloDashboard.cargarDatosPareto();
+        }
     },
 
     // ============================================
@@ -750,6 +896,332 @@ export const moduloDashboard = {
                 icon.classList.remove('fa-spin');
             }
         }
+    },
+
+    // ============================================
+    // TABS: Cambiar entre KPIs y Pareto
+    // ============================================
+    cambiarTab: async (tab) => {
+        tabActivo = tab;
+        moduloDashboard.actualizarEstadoTabs();
+
+        // Si es Pareto y no hay datos, cargarlos
+        if (tab === 'pareto' && datosPareto.length === 0) {
+            await moduloDashboard.cargarDatosPareto();
+        }
+    },
+
+    actualizarEstadoTabs: () => {
+        // Actualizar botones
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.dataset.tab === tabActivo) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Mostrar/ocultar contenido
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.add('hidden');
+        });
+
+        const tabContent = document.getElementById(`tab-${tabActivo}`);
+        if (tabContent) {
+            tabContent.classList.remove('hidden');
+        }
+    },
+
+    // ============================================
+    // CARGAR DATOS PARETO
+    // ============================================
+    cargarDatosPareto: async () => {
+        try {
+            // Intentar con RPC primero
+            const [paretoResult, resumenResult] = await Promise.all([
+                supabase.rpc('obtener_analisis_pareto', {
+                    p_fecha_desde: filtros.desde,
+                    p_fecha_hasta: filtros.hasta
+                }),
+                supabase.rpc('obtener_resumen_pareto', {
+                    p_fecha_desde: filtros.desde,
+                    p_fecha_hasta: filtros.hasta
+                })
+            ]);
+
+            if (paretoResult.error) {
+                console.log('RPC Pareto no disponible, usando fallback...');
+                await moduloDashboard.cargarDatosParetoFallback();
+                return;
+            }
+
+            datosPareto = paretoResult.data || [];
+
+            if (!resumenResult.error && resumenResult.data && resumenResult.data.length > 0) {
+                resumenPareto = resumenResult.data[0];
+            }
+
+            // Pintar UI
+            moduloDashboard.pintarResumenPareto();
+            moduloDashboard.pintarGraficoPareto();
+            moduloDashboard.pintarTablaPareto();
+
+        } catch (error) {
+            console.error('Error cargando Pareto:', error);
+            await moduloDashboard.cargarDatosParetoFallback();
+        }
+    },
+
+    // ============================================
+    // FALLBACK: Calcular Pareto en JS
+    // ============================================
+    cargarDatosParetoFallback: async () => {
+        try {
+            // Obtener ordenes del periodo
+            const { data: ordenes, error } = await supabase
+                .from('ordenes_meli')
+                .select('id_item, sku, titulo_item, cantidad, neto_recibido, precio_unitario, fecha_pago, fecha_creacion')
+                .gte('fecha_creacion', filtros.desde)
+                .lte('fecha_creacion', filtros.hasta);
+
+            if (error || !ordenes || ordenes.length === 0) {
+                datosPareto = [];
+                resumenPareto = {};
+                moduloDashboard.pintarResumenPareto();
+                moduloDashboard.pintarGraficoPareto();
+                moduloDashboard.pintarTablaPareto();
+                return;
+            }
+
+            // Agrupar por id_item
+            const ventasPorItem = {};
+            let totalGeneral = 0;
+
+            ordenes.forEach(o => {
+                const key = o.id_item || 'N/A';
+                const neto = parseFloat(o.neto_recibido) || (parseFloat(o.cantidad) * parseFloat(o.precio_unitario)) || 0;
+
+                if (!ventasPorItem[key]) {
+                    ventasPorItem[key] = {
+                        id_item: o.id_item,
+                        sku: o.sku || 'N/A',
+                        titulo: o.titulo_item || 'Sin titulo',
+                        cantidad_vendida: 0,
+                        total_neto: 0
+                    };
+                }
+
+                ventasPorItem[key].cantidad_vendida += parseInt(o.cantidad) || 0;
+                ventasPorItem[key].total_neto += neto;
+                totalGeneral += neto;
+            });
+
+            // Ordenar por total_neto descendente
+            const itemsOrdenados = Object.values(ventasPorItem).sort((a, b) => b.total_neto - a.total_neto);
+
+            // Calcular porcentajes acumulados
+            let acumulado = 0;
+            datosPareto = itemsOrdenados.map(item => {
+                const pctTotal = totalGeneral > 0 ? (item.total_neto / totalGeneral) * 100 : 0;
+                acumulado += pctTotal;
+                return {
+                    ...item,
+                    porcentaje_total: Math.round(pctTotal * 100) / 100,
+                    porcentaje_acumulado: Math.round(acumulado * 100) / 100,
+                    es_top_80: acumulado <= 80
+                };
+            });
+
+            // Calcular resumen
+            const top80 = datosPareto.filter(d => d.es_top_80);
+            resumenPareto = {
+                total_facturado: totalGeneral,
+                total_publicaciones: datosPareto.length,
+                publicaciones_top_80: top80.length,
+                publicaciones_resto: datosPareto.length - top80.length,
+                facturacion_top_80: top80.reduce((s, d) => s + d.total_neto, 0),
+                facturacion_resto: totalGeneral - top80.reduce((s, d) => s + d.total_neto, 0),
+                pct_publicaciones_top: datosPareto.length > 0 ? Math.round((top80.length / datosPareto.length) * 1000) / 10 : 0,
+                pct_facturacion_top: totalGeneral > 0 ? Math.round((top80.reduce((s, d) => s + d.total_neto, 0) / totalGeneral) * 1000) / 10 : 0
+            };
+
+            // Pintar UI
+            moduloDashboard.pintarResumenPareto();
+            moduloDashboard.pintarGraficoPareto();
+            moduloDashboard.pintarTablaPareto();
+
+            mostrarNotificacion('Analisis Pareto cargado (modo fallback)', 'info');
+
+        } catch (error) {
+            console.error('Error en fallback Pareto:', error);
+            mostrarNotificacion('Error cargando analisis 80/20', 'error');
+        }
+    },
+
+    // ============================================
+    // PINTAR RESUMEN PARETO
+    // ============================================
+    pintarResumenPareto: () => {
+        const paretoTotal = document.getElementById('pareto-total');
+        const paretoPubsTotal = document.getElementById('pareto-pubs-total');
+        const paretoTopCount = document.getElementById('pareto-top-count');
+        const paretoRestoCount = document.getElementById('pareto-resto-count');
+        const paretoTopPct = document.getElementById('pareto-top-pct');
+        const paretoRestoPct = document.getElementById('pareto-resto-pct');
+
+        if (paretoTotal) paretoTotal.textContent = formatearMoneda(resumenPareto.total_facturado || 0);
+        if (paretoPubsTotal) paretoPubsTotal.textContent = formatearNumero(resumenPareto.total_publicaciones || 0);
+        if (paretoTopCount) paretoTopCount.textContent = formatearNumero(resumenPareto.publicaciones_top_80 || 0);
+        if (paretoRestoCount) paretoRestoCount.textContent = formatearNumero(resumenPareto.publicaciones_resto || 0);
+
+        if (paretoTopPct) {
+            paretoTopPct.textContent = `${resumenPareto.pct_publicaciones_top || 0}% de publicaciones`;
+        }
+        if (paretoRestoPct) {
+            paretoRestoPct.textContent = `${100 - (resumenPareto.pct_publicaciones_top || 0)}% de publicaciones`;
+        }
+    },
+
+    // ============================================
+    // PINTAR GRAFICO DOUGHNUT PARETO
+    // ============================================
+    pintarGraficoPareto: () => {
+        const canvas = document.getElementById('chart-pareto');
+        if (!canvas) return;
+
+        // Destruir grafico anterior
+        if (chartParetoInstance) {
+            chartParetoInstance.destroy();
+        }
+
+        const top80 = resumenPareto.facturacion_top_80 || 0;
+        const resto = resumenPareto.facturacion_resto || 0;
+
+        // Si no hay datos
+        if (top80 === 0 && resto === 0) {
+            chartParetoInstance = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Sin datos'],
+                    datasets: [{
+                        data: [1],
+                        backgroundColor: ['#e5e7eb']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+            return;
+        }
+
+        chartParetoInstance = new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: [
+                    `Top 80% (${resumenPareto.publicaciones_top_80 || 0} pubs)`,
+                    `Resto 20% (${resumenPareto.publicaciones_resto || 0} pubs)`
+                ],
+                datasets: [{
+                    data: [top80, resto],
+                    backgroundColor: [
+                        'rgba(78, 171, 135, 0.8)',  // Verde brand
+                        'rgba(156, 163, 175, 0.6)'  // Gris
+                    ],
+                    borderColor: [
+                        'rgba(78, 171, 135, 1)',
+                        'rgba(156, 163, 175, 1)'
+                    ],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '60%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 15,
+                            usePointStyle: true
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return `${context.label}: ${formatearMoneda(value)} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    },
+
+    // ============================================
+    // PINTAR TABLA PARETO
+    // ============================================
+    pintarTablaPareto: () => {
+        const tbody = document.getElementById('tabla-pareto');
+        if (!tbody) return;
+
+        if (datosPareto.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">
+                        <i class="fas fa-inbox fa-2x mb-2"></i>
+                        <p>No hay ventas en el periodo seleccionado</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = datosPareto.map((p, idx) => {
+            const esTop = p.es_top_80;
+            const rowClass = esTop ? 'bg-green-50/50' : '';
+            const indicador = esTop
+                ? '<span class="w-2 h-2 bg-green-500 rounded-full inline-block"></span>'
+                : '<span class="w-2 h-2 bg-gray-400 rounded-full inline-block"></span>';
+
+            // SKU display
+            let skuDisplay = p.sku;
+            if (!skuDisplay || skuDisplay === 'N/A') {
+                skuDisplay = p.id_item ? `...${p.id_item.slice(-8)}` : '-';
+            }
+
+            return `
+            <tr class="hover:bg-gray-50 transition-colors ${rowClass}">
+                <td class="px-4 py-3 font-bold text-gray-400 w-12">
+                    <div class="flex items-center gap-2">
+                        ${indicador}
+                        ${idx + 1}
+                    </div>
+                </td>
+                <td class="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">${skuDisplay}</td>
+                <td class="px-4 py-3">
+                    <div class="truncate" style="max-width: 350px;" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                </td>
+                <td class="px-4 py-3 text-right font-medium whitespace-nowrap">${formatearNumero(p.cantidad_vendida || 0)}</td>
+                <td class="px-4 py-3 text-right font-medium ${esTop ? 'text-green-600' : 'text-gray-600'} whitespace-nowrap">
+                    ${formatearMoneda(p.total_neto || 0)}
+                </td>
+                <td class="px-4 py-3 text-right text-gray-500 whitespace-nowrap">${p.porcentaje_total || 0}%</td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">
+                    <span class="px-2 py-1 rounded text-xs font-medium ${esTop ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}">
+                        ${p.porcentaje_acumulado || 0}%
+                    </span>
+                </td>
+            </tr>
+        `;
+        }).join('');
     }
 };
 
