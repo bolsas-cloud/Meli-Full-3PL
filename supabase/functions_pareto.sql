@@ -39,19 +39,19 @@ BEGIN
 
     RETURN QUERY
     WITH ventas_por_item AS (
-        -- Agrupar ventas por publicacion
+        -- Agrupar ventas SOLO por id_item (evita duplicados por diferencias en SKU/titulo)
         SELECT
             o.id_item,
-            COALESCE(NULLIF(o.sku, ''), NULLIF(p.sku, ''), 'N/A') AS sku,
-            COALESCE(o.titulo_item, p.titulo, 'Sin titulo') AS titulo,
+            -- Tomar el primer SKU no vacio encontrado
+            MAX(COALESCE(NULLIF(o.sku, ''), NULLIF(p.sku, ''), 'N/A')) AS sku,
+            -- Tomar el primer titulo no vacio encontrado
+            MAX(COALESCE(o.titulo_item, p.titulo, 'Sin titulo')) AS titulo,
             SUM(o.cantidad)::BIGINT AS cantidad_vendida,
             COALESCE(SUM(COALESCE(o.neto_recibido, o.cantidad * o.precio_unitario)), 0) AS total_neto
         FROM ordenes_meli o
         LEFT JOIN publicaciones_meli p ON o.id_item = p.id_publicacion
         WHERE DATE(COALESCE(o.fecha_pago, o.fecha_creacion)) BETWEEN p_fecha_desde AND p_fecha_hasta
-        GROUP BY o.id_item,
-                 COALESCE(NULLIF(o.sku, ''), NULLIF(p.sku, ''), 'N/A'),
-                 COALESCE(o.titulo_item, p.titulo, 'Sin titulo')
+        GROUP BY o.id_item  -- Solo agrupar por id_item
     ),
     ventas_ordenadas AS (
         -- Ordenar por total neto descendente y calcular porcentajes
