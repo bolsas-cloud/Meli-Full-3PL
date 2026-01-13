@@ -282,16 +282,16 @@ export const moduloDashboard = {
                             </div>
                         </div>
                         <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
-                            <table class="min-w-full divide-y divide-gray-100 table-fixed">
+                            <table class="min-w-full divide-y divide-gray-100">
                                 <thead class="bg-gray-50 sticky top-0">
                                     <tr>
-                                        <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-12">#</th>
-                                        <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-36">SKU</th>
-                                        <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
-                                        <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-16">Cant</th>
-                                        <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-24">Neto</th>
-                                        <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-16">%</th>
-                                        <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-20">Acum</th>
+                                        <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 50px;">#</th>
+                                        <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 140px;">SKU</th>
+                                        <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                        <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">Cant</th>
+                                        <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 110px;">Neto</th>
+                                        <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">%</th>
+                                        <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 85px;">Acum</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tabla-pareto" class="divide-y divide-gray-100 text-sm">
@@ -1199,23 +1199,23 @@ export const moduloDashboard = {
 
             return `
             <tr class="hover:bg-gray-50 transition-colors ${rowClass}">
-                <td class="px-2 py-2 font-bold text-gray-400 w-12">
-                    <div class="flex items-center gap-1">
+                <td class="px-3 py-2.5 font-bold text-gray-400">
+                    <div class="flex items-center gap-1.5">
                         ${indicador}
                         ${idx + 1}
                     </div>
                 </td>
-                <td class="px-2 py-2 font-mono text-xs text-gray-600 truncate w-36" title="${skuDisplay}">${skuDisplay}</td>
-                <td class="px-2 py-2" title="${(p.titulo || '').replace(/"/g, '&quot;')}">
-                    <div class="text-sm leading-tight">${p.titulo || '-'}</div>
+                <td class="px-3 py-2.5 font-mono text-xs text-gray-600" title="${skuDisplay}">${skuDisplay}</td>
+                <td class="px-3 py-2.5" title="${(p.titulo || '').replace(/"/g, '&quot;')}">
+                    <div class="text-sm">${p.titulo || '-'}</div>
                 </td>
-                <td class="px-2 py-2 text-right font-medium whitespace-nowrap w-16">${formatearNumero(p.cantidad_vendida || 0)}</td>
-                <td class="px-2 py-2 text-right font-medium ${esTop ? 'text-green-600' : 'text-gray-600'} whitespace-nowrap w-24">
+                <td class="px-3 py-2.5 text-right font-medium">${formatearNumero(p.cantidad_vendida || 0)}</td>
+                <td class="px-3 py-2.5 text-right font-medium ${esTop ? 'text-green-600' : 'text-gray-600'}">
                     ${formatearMoneda(p.total_neto || 0)}
                 </td>
-                <td class="px-2 py-2 text-right text-gray-500 whitespace-nowrap w-16">${p.porcentaje_total || 0}%</td>
-                <td class="px-2 py-2 text-right whitespace-nowrap w-20">
-                    <span class="px-1.5 py-0.5 rounded text-xs font-medium ${esTop ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}">
+                <td class="px-3 py-2.5 text-right text-gray-500">${p.porcentaje_total || 0}%</td>
+                <td class="px-3 py-2.5 text-right">
+                    <span class="px-2 py-1 rounded text-xs font-medium ${esTop ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}">
                         ${p.porcentaje_acumulado || 0}%
                     </span>
                 </td>
