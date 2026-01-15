@@ -161,12 +161,46 @@ Cuando hay diferencia entre cantidad original y enviada:
 
 ---
 
+## Clasificacion Pareto en Calculadora (v1.6.0)
+
+La calculadora de envios incluye clasificacion automatica de productos basada en el principio Pareto 80/20.
+
+### Categorias
+
+| Categoria | Rango % Acum | Icono | Descripcion |
+|-----------|--------------|-------|-------------|
+| **Estrella** | 0% - 80% | 🚀 | Productos que generan el 80% de la facturacion |
+| **Regular** | 80% - 95% | 📦 | Productos de importancia media |
+| **Complemento** | 95% - 100% | 🧩 | Cola larga, bajo impacto en facturacion |
+
+### Funcionalidades
+
+1. **Columna "Cat"**: Muestra emoji de categoria con tooltip indicando % acumulado
+2. **Filtros rapidos**: Botones para filtrar por categoria con contadores dinamicos
+3. **Calculo automatico**: Se ejecuta al calcular sugerencias de envio
+
+### Fuente de Datos
+
+La clasificacion se calcula desde las ordenes de los ultimos 90 dias:
+
+1. **RPC preferido**: `obtener_analisis_pareto(fecha_desde, fecha_hasta)` si esta disponible
+2. **Fallback JS**: Calculo local desde `ordenes_meli` agrupando por `id_item`
+
+### Uso Practico
+
+- **Priorizar Estrellas**: Productos 🚀 deben tener stock disponible siempre
+- **Evaluar Regulares**: Productos 📦 pueden tolerar ruptura ocasional
+- **Optimizar Complementos**: Productos 🧩 pueden enviarse en lotes menos frecuentes
+
+---
+
 ## Archivos Relacionados
 
 | Archivo | Descripción |
 |---------|-------------|
 | `src/modules/enviosCreados.js` | Módulo principal |
-| `src/modules/calculadoraEnvios.js` | Creación de envíos |
+| `src/modules/calculadoraEnvios.js` | Creación de envíos + clasificación Pareto |
+| `supabase/functions_pareto.sql` | Funciones RPC para análisis Pareto |
 
 ---
 
