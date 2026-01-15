@@ -137,6 +137,10 @@ export const moduloCalculadora = {
                                         class="text-sm bg-red-50 text-red-700 px-3 py-1 rounded-lg hover:bg-red-100 transition-colors">
                                     Seleccionar Críticos
                                 </button>
+                                <button onclick="moduloCalculadora.seleccionarRiesgo()"
+                                        class="text-sm bg-orange-50 text-orange-700 px-3 py-1 rounded-lg hover:bg-orange-100 transition-colors">
+                                    Seleccionar Riesgo
+                                </button>
                                 <button onclick="moduloCalculadora.registrarEnvio()"
                                         class="text-sm bg-brand text-white px-4 py-1 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-1"
                                         id="btn-registrar" disabled>
@@ -952,6 +956,34 @@ export const moduloCalculadora = {
 
         const filtroNombre = filtroCategoria === 'todas' ? '' : ` en categoría ${filtroCategoria}`;
         mostrarNotificacion(`${productosSeleccionados.size} productos críticos seleccionados${filtroNombre}`, 'info');
+    },
+
+    // ============================================
+    // SELECCIÓN: Solo riesgo (respeta filtro activo)
+    // ============================================
+    seleccionarRiesgo: () => {
+        // Usar sugerencias filtradas según categoría activa
+        const sugerenciasVisibles = moduloCalculadora.obtenerSugerenciasFiltradas();
+
+        // Limpiar selección actual de productos visibles
+        sugerenciasVisibles.forEach(s => {
+            const key = s.id_publicacion || s.sku;
+            productosSeleccionados.delete(key);
+        });
+
+        // Seleccionar solo productos en RIESGO VISIBLES
+        sugerenciasVisibles
+            .filter(s => s.nivel_riesgo === 'RIESGO')
+            .forEach(s => {
+                const key = s.id_publicacion || s.sku;
+                productosSeleccionados.add(key);
+            });
+
+        moduloCalculadora.pintarTabla();
+        moduloCalculadora.actualizarBotonRegistrar();
+
+        const filtroNombre = filtroCategoria === 'todas' ? '' : ` en categoría ${filtroCategoria}`;
+        mostrarNotificacion(`${productosSeleccionados.size} productos en riesgo seleccionados${filtroNombre}`, 'info');
     },
 
     // ============================================
