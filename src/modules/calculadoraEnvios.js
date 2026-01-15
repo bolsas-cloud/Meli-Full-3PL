@@ -13,6 +13,10 @@ let sugerencias = [];
 let configLogistica = {};
 let productosSeleccionados = new Set();
 
+// Estado para clasificación Pareto
+let clasificacionPareto = {};  // { id_publicacion: { categoria, porcentaje_acumulado } }
+let filtroCategoria = 'todas'; // 'todas', 'estrella', 'regular', 'complemento'
+
 export const moduloCalculadora = {
 
     // ============================================
@@ -125,18 +129,44 @@ export const moduloCalculadora = {
 
                 <!-- Tabla de Sugerencias -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div class="p-4 border-b border-gray-100 flex justify-between items-center">
-                        <h3 class="font-bold text-gray-800">Sugerencias de Envío</h3>
-                        <div class="flex gap-2">
-                            <button onclick="moduloCalculadora.seleccionarCriticos()"
-                                    class="text-sm bg-red-50 text-red-700 px-3 py-1 rounded-lg hover:bg-red-100 transition-colors">
-                                Seleccionar Críticos
+                    <div class="p-4 border-b border-gray-100">
+                        <div class="flex justify-between items-center mb-3">
+                            <h3 class="font-bold text-gray-800">Sugerencias de Envío</h3>
+                            <div class="flex gap-2">
+                                <button onclick="moduloCalculadora.seleccionarCriticos()"
+                                        class="text-sm bg-red-50 text-red-700 px-3 py-1 rounded-lg hover:bg-red-100 transition-colors">
+                                    Seleccionar Críticos
+                                </button>
+                                <button onclick="moduloCalculadora.registrarEnvio()"
+                                        class="text-sm bg-brand text-white px-4 py-1 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-1"
+                                        id="btn-registrar" disabled>
+                                    <i class="fas fa-truck"></i>
+                                    Registrar Envío
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Filtros por Clasificación Pareto -->
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-xs font-medium text-gray-500">Clasificación:</span>
+                            <button onclick="moduloCalculadora.filtrarCategoria('todas')"
+                                    class="filtro-cat text-xs px-3 py-1.5 rounded-lg border transition-colors"
+                                    data-categoria="todas">
+                                Todas
                             </button>
-                            <button onclick="moduloCalculadora.registrarEnvio()"
-                                    class="text-sm bg-brand text-white px-4 py-1 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-1"
-                                    id="btn-registrar" disabled>
-                                <i class="fas fa-truck"></i>
-                                Registrar Envío
+                            <button onclick="moduloCalculadora.filtrarCategoria('estrella')"
+                                    class="filtro-cat text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1"
+                                    data-categoria="estrella">
+                                <span>🚀</span> Estrella <span id="count-estrella" class="text-gray-400">(0)</span>
+                            </button>
+                            <button onclick="moduloCalculadora.filtrarCategoria('regular')"
+                                    class="filtro-cat text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1"
+                                    data-categoria="regular">
+                                <span>📦</span> Regular <span id="count-regular" class="text-gray-400">(0)</span>
+                            </button>
+                            <button onclick="moduloCalculadora.filtrarCategoria('complemento')"
+                                    class="filtro-cat text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1"
+                                    data-categoria="complemento">
+                                <span>🧩</span> Complemento <span id="count-complemento" class="text-gray-400">(0)</span>
                             </button>
                         </div>
                     </div>
@@ -148,6 +178,7 @@ export const moduloCalculadora = {
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 40px;">
                                         <input type="checkbox" id="check-all" onchange="moduloCalculadora.toggleAll(this)">
                                     </th>
+                                    <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase" style="width: 50px;" title="Clasificación Pareto">Cat</th>
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 150px;">SKU</th>
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">V/Día</th>
@@ -161,7 +192,7 @@ export const moduloCalculadora = {
                             </thead>
                             <tbody id="tabla-sugerencias" class="divide-y divide-gray-100 text-sm">
                                 <tr>
-                                    <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                                         <i class="fas fa-calculator fa-2x mb-2"></i>
                                         <p>Haz clic en "Calcular Sugerencias" para ver los resultados</p>
                                     </td>
@@ -174,8 +205,46 @@ export const moduloCalculadora = {
             </div>
         `;
 
+        // Estilos para botones de filtro Pareto
+        const style = document.createElement('style');
+        style.textContent = `
+            .filtro-cat {
+                background: white;
+                border-color: #e5e7eb;
+                color: #6b7280;
+            }
+            .filtro-cat:hover {
+                background: #f3f4f6;
+                border-color: #d1d5db;
+            }
+            .filtro-cat.active {
+                background: #3b82f6;
+                border-color: #3b82f6;
+                color: white;
+            }
+            .filtro-cat.active span {
+                color: white;
+            }
+            .filtro-cat[data-categoria="estrella"].active {
+                background: #10b981;
+                border-color: #10b981;
+            }
+            .filtro-cat[data-categoria="regular"].active {
+                background: #3b82f6;
+                border-color: #3b82f6;
+            }
+            .filtro-cat[data-categoria="complemento"].active {
+                background: #8b5cf6;
+                border-color: #8b5cf6;
+            }
+        `;
+        document.head.appendChild(style);
+
         // Cargar configuración guardada
         await moduloCalculadora.cargarConfig();
+
+        // Activar filtro "todas" por defecto
+        document.querySelector('.filtro-cat[data-categoria="todas"]')?.classList.add('active');
 
         // Exponer módulo en window
         window.moduloCalculadora = moduloCalculadora;
@@ -261,7 +330,7 @@ export const moduloCalculadora = {
             mostrarNotificacion('Selecciona una fecha de colecta para calcular', 'warning');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="10" class="px-4 py-8 text-center text-yellow-600">
+                    <td colspan="11" class="px-4 py-8 text-center text-yellow-600">
                         <i class="fas fa-calendar-alt fa-2x mb-2"></i>
                         <p>Selecciona una fecha de colecta programada</p>
                     </td>
@@ -273,7 +342,7 @@ export const moduloCalculadora = {
         // ========== PASO 1: Sincronizar datos desde ML ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-sync-alt fa-spin fa-2x mb-2"></i>
                     <p>Sincronizando datos con Mercado Libre...</p>
                 </td>
@@ -286,7 +355,7 @@ export const moduloCalculadora = {
         // ========== PASO 1.5: Actualizar ventas diarias desde órdenes ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-chart-line fa-spin fa-2x mb-2"></i>
                     <p>Calculando ventas diarias desde órdenes...</p>
                 </td>
@@ -313,7 +382,7 @@ export const moduloCalculadora = {
         // ========== PASO 1.6: Actualizar stock en tránsito desde envíos activos ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-truck fa-spin fa-2x mb-2"></i>
                     <p>Calculando stock en tránsito...</p>
                 </td>
@@ -324,7 +393,7 @@ export const moduloCalculadora = {
         // ========== PASO 2: Calcular sugerencias ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-calculator fa-spin fa-2x mb-2"></i>
                     <p>Calculando sugerencias...</p>
                 </td>
@@ -360,6 +429,22 @@ export const moduloCalculadora = {
                 mostrarNotificacion('No hay productos fulfillment. Usando demo.', 'warning');
             }
 
+            // ========== PASO 3: Calcular clasificación Pareto ==========
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                        <i class="fas fa-chart-pie fa-spin fa-2x mb-2"></i>
+                        <p>Calculando clasificación Pareto...</p>
+                    </td>
+                </tr>
+            `;
+            await moduloCalculadora.calcularClasificacionPareto();
+
+            // Resetear filtro a "todas"
+            filtroCategoria = 'todas';
+            document.querySelectorAll('.filtro-cat').forEach(btn => btn.classList.remove('active'));
+            document.querySelector('.filtro-cat[data-categoria="todas"]')?.classList.add('active');
+
             // Pintar tabla
             moduloCalculadora.pintarTabla();
 
@@ -370,7 +455,7 @@ export const moduloCalculadora = {
             console.error('Error calculando:', error);
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="10" class="px-4 py-8 text-center text-red-500">
+                    <td colspan="11" class="px-4 py-8 text-center text-red-500">
                         <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
                         <p>Error al calcular: ${error.message}</p>
                     </td>
@@ -490,7 +575,7 @@ export const moduloCalculadora = {
         if (sugerencias.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="10" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
                         <p>No hay sugerencias disponibles</p>
                     </td>
                 </tr>
@@ -498,16 +583,69 @@ export const moduloCalculadora = {
             return;
         }
 
+        // Aplicar filtro de categoría Pareto
+        let sugerenciasFiltradas = sugerencias;
+        if (filtroCategoria !== 'todas') {
+            sugerenciasFiltradas = sugerencias.filter(s => {
+                const info = clasificacionPareto[s.id_publicacion];
+                return info && info.categoria === filtroCategoria;
+            });
+        }
+
+        if (sugerenciasFiltradas.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                        <p>No hay productos en esta categoría</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        // Helper para obtener emoji y tooltip de categoría
+        const getCategoria = (idPub) => {
+            const info = clasificacionPareto[idPub];
+            if (!info) return { emoji: '-', tooltip: 'Sin clasificar', clase: 'text-gray-400' };
+
+            switch (info.categoria) {
+                case 'estrella':
+                    return {
+                        emoji: '🚀',
+                        tooltip: `Estrella (${info.porcentaje_acumulado.toFixed(1)}% acum)`,
+                        clase: 'text-green-600'
+                    };
+                case 'regular':
+                    return {
+                        emoji: '📦',
+                        tooltip: `Regular (${info.porcentaje_acumulado.toFixed(1)}% acum)`,
+                        clase: 'text-blue-600'
+                    };
+                case 'complemento':
+                    return {
+                        emoji: '🧩',
+                        tooltip: `Complemento (${info.porcentaje_acumulado.toFixed(1)}% acum)`,
+                        clase: 'text-purple-600'
+                    };
+                default:
+                    return { emoji: '-', tooltip: 'Sin clasificar', clase: 'text-gray-400' };
+            }
+        };
+
         // Usar id_publicacion como clave única (fallback a sku para datos demo)
-        // Columnas igual que GAS: SKU, Título, V, Stock Full, En Tránsito, Stock Seg., Cobertura, A ENVIAR, Riesgo
-        tbody.innerHTML = sugerencias.map(s => {
+        // Columnas: Check, Cat, SKU, Título, V, Stock Full, En Tránsito, Stock Seg., Cobertura, A ENVIAR, Riesgo
+        tbody.innerHTML = sugerenciasFiltradas.map(s => {
             const key = s.id_publicacion || s.sku;
+            const cat = getCategoria(s.id_publicacion);
             return `
             <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(key) ? 'bg-brand-light' : ''}">
                 <td class="px-3 py-3">
                     <input type="checkbox"
                            ${productosSeleccionados.has(key) ? 'checked' : ''}
                            onchange="moduloCalculadora.toggleSeleccion('${key}')">
+                </td>
+                <td class="px-3 py-3 text-center text-lg" title="${cat.tooltip}">
+                    <span class="${cat.clase}">${cat.emoji}</span>
                 </td>
                 <td class="px-3 py-3 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
                 <td class="px-3 py-3">
@@ -570,6 +708,162 @@ export const moduloCalculadora = {
         } catch (err) {
             console.warn('RPC stats no disponible:', err);
         }
+    },
+
+    // ============================================
+    // CALCULAR CLASIFICACIÓN PARETO: Desde órdenes de los últimos 90 días
+    // 🚀 Estrella: 0-80% acumulado (genera el 80% de la facturación)
+    // 📦 Regular: 80-95% acumulado
+    // 🧩 Complemento: 95-100% acumulado
+    // ============================================
+    calcularClasificacionPareto: async () => {
+        try {
+            // Intentar usar RPC si existe
+            const fechaDesde = new Date();
+            fechaDesde.setDate(fechaDesde.getDate() - 90);
+            const fechaDesdeStr = fechaDesde.toISOString().split('T')[0];
+            const fechaHastaStr = new Date().toISOString().split('T')[0];
+
+            // Intentar con RPC primero
+            try {
+                const { data: paretoData, error: paretoError } = await supabase.rpc('obtener_analisis_pareto', {
+                    p_fecha_desde: fechaDesdeStr,
+                    p_fecha_hasta: fechaHastaStr
+                });
+
+                if (!paretoError && paretoData && paretoData.length > 0) {
+                    console.log(`[PARETO] Usando RPC - ${paretoData.length} productos clasificados`);
+
+                    // Mapear resultado del RPC
+                    clasificacionPareto = {};
+                    paretoData.forEach(item => {
+                        const pctAcum = parseFloat(item.porcentaje_acumulado) || 0;
+                        let categoria = 'complemento';
+                        if (pctAcum <= 80) categoria = 'estrella';
+                        else if (pctAcum <= 95) categoria = 'regular';
+
+                        clasificacionPareto[item.id_item] = {
+                            categoria,
+                            porcentaje_acumulado: pctAcum,
+                            total_neto: parseFloat(item.total_neto) || 0
+                        };
+                    });
+
+                    moduloCalculadora.actualizarContadoresPareto();
+                    return;
+                }
+            } catch (rpcErr) {
+                console.warn('RPC obtener_analisis_pareto no disponible:', rpcErr);
+            }
+
+            // Fallback: Calcular en JS
+            console.log('[PARETO] Calculando en JavaScript...');
+
+            // Obtener órdenes de los últimos 90 días con neto_recibido
+            const { data: ordenes, error } = await supabase
+                .from('ordenes_meli')
+                .select('id_item, neto_recibido, cantidad, precio_unitario')
+                .gte('fecha_pago', fechaDesde.toISOString());
+
+            if (error) throw error;
+
+            if (!ordenes || ordenes.length === 0) {
+                console.log('[PARETO] No hay órdenes para clasificar');
+                clasificacionPareto = {};
+                moduloCalculadora.actualizarContadoresPareto();
+                return;
+            }
+
+            // Agrupar por id_item y sumar neto
+            const ventasPorItem = {};
+            ordenes.forEach(o => {
+                if (!o.id_item) return;
+                const neto = parseFloat(o.neto_recibido) ||
+                            (parseFloat(o.cantidad) * parseFloat(o.precio_unitario)) || 0;
+                ventasPorItem[o.id_item] = (ventasPorItem[o.id_item] || 0) + neto;
+            });
+
+            // Convertir a array y ordenar por neto descendente
+            const items = Object.entries(ventasPorItem)
+                .map(([id_item, total_neto]) => ({ id_item, total_neto }))
+                .sort((a, b) => b.total_neto - a.total_neto);
+
+            // Calcular total general
+            const totalGeneral = items.reduce((sum, i) => sum + i.total_neto, 0);
+
+            if (totalGeneral === 0) {
+                console.log('[PARETO] Total facturación = 0');
+                clasificacionPareto = {};
+                moduloCalculadora.actualizarContadoresPareto();
+                return;
+            }
+
+            // Calcular porcentaje acumulado y clasificar
+            let acumulado = 0;
+            clasificacionPareto = {};
+
+            items.forEach(item => {
+                acumulado += item.total_neto;
+                const pctAcum = (acumulado / totalGeneral) * 100;
+
+                let categoria = 'complemento';
+                if (pctAcum <= 80) categoria = 'estrella';
+                else if (pctAcum <= 95) categoria = 'regular';
+
+                clasificacionPareto[item.id_item] = {
+                    categoria,
+                    porcentaje_acumulado: pctAcum,
+                    total_neto: item.total_neto
+                };
+            });
+
+            console.log(`[PARETO] Clasificados ${Object.keys(clasificacionPareto).length} productos`);
+            moduloCalculadora.actualizarContadoresPareto();
+
+        } catch (err) {
+            console.error('Error calculando clasificación Pareto:', err);
+            clasificacionPareto = {};
+        }
+    },
+
+    // ============================================
+    // ACTUALIZAR CONTADORES: Botones de filtro Pareto
+    // ============================================
+    actualizarContadoresPareto: () => {
+        // Contar productos por categoría que están en las sugerencias actuales
+        const contadores = { estrella: 0, regular: 0, complemento: 0 };
+
+        sugerencias.forEach(s => {
+            const info = clasificacionPareto[s.id_publicacion];
+            if (info) {
+                contadores[info.categoria]++;
+            }
+        });
+
+        // Actualizar badges en los botones
+        const countEstrella = document.getElementById('count-estrella');
+        const countRegular = document.getElementById('count-regular');
+        const countComplemento = document.getElementById('count-complemento');
+
+        if (countEstrella) countEstrella.textContent = `(${contadores.estrella})`;
+        if (countRegular) countRegular.textContent = `(${contadores.regular})`;
+        if (countComplemento) countComplemento.textContent = `(${contadores.complemento})`;
+    },
+
+    // ============================================
+    // FILTRAR CATEGORÍA: Aplicar filtro de clasificación
+    // ============================================
+    filtrarCategoria: (categoria) => {
+        filtroCategoria = categoria;
+
+        // Actualizar estilo de botones
+        document.querySelectorAll('.filtro-cat').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`.filtro-cat[data-categoria="${categoria}"]`)?.classList.add('active');
+
+        // Re-pintar tabla con filtro aplicado
+        moduloCalculadora.pintarTabla();
     },
 
     // ============================================
