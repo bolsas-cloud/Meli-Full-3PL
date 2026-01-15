@@ -867,6 +867,19 @@ export const moduloCalculadora = {
     },
 
     // ============================================
+    // HELPER: Obtener sugerencias filtradas según categoría activa
+    // ============================================
+    obtenerSugerenciasFiltradas: () => {
+        if (filtroCategoria === 'todas') {
+            return sugerencias;
+        }
+        return sugerencias.filter(s => {
+            const info = clasificacionPareto[s.id_publicacion];
+            return info && info.categoria === filtroCategoria;
+        });
+    },
+
+    // ============================================
     // SELECCIÓN: Toggle checkbox individual
     // ============================================
     toggleSeleccion: (sku) => {
@@ -880,45 +893,65 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // SELECCIÓN: Toggle todos (solo con cantidad > 0)
+    // SELECCIÓN: Toggle todos (solo visibles con cantidad > 0)
     // ============================================
     toggleAll: (checkbox) => {
+        // Usar sugerencias filtradas según categoría activa
+        const sugerenciasVisibles = moduloCalculadora.obtenerSugerenciasFiltradas();
+
         if (checkbox.checked) {
-            // Solo seleccionar productos con cantidad a enviar > 0
-            sugerencias
+            // Solo seleccionar productos VISIBLES con cantidad a enviar > 0
+            sugerenciasVisibles
                 .filter(s => (parseInt(s.cantidad_a_enviar) || 0) > 0)
                 .forEach(s => {
                     const key = s.id_publicacion || s.sku;
                     productosSeleccionados.add(key);
                 });
 
-            const conCantidad = sugerencias.filter(s => (parseInt(s.cantidad_a_enviar) || 0) > 0).length;
+            const conCantidad = sugerenciasVisibles.filter(s => (parseInt(s.cantidad_a_enviar) || 0) > 0).length;
             if (conCantidad === 0) {
-                mostrarNotificacion('No hay productos con cantidad > 0', 'warning');
-            } else if (conCantidad < sugerencias.length) {
-                mostrarNotificacion(`${conCantidad} de ${sugerencias.length} productos seleccionados (solo con cantidad > 0)`, 'info');
+                mostrarNotificacion('No hay productos con cantidad > 0 en esta vista', 'warning');
+            } else {
+                const filtroNombre = filtroCategoria === 'todas' ? '' : ` (${filtroCategoria})`;
+                mostrarNotificacion(`${conCantidad} productos seleccionados${filtroNombre}`, 'info');
             }
         } else {
-            productosSeleccionados.clear();
+            // Deseleccionar solo los productos VISIBLES
+            sugerenciasVisibles.forEach(s => {
+                const key = s.id_publicacion || s.sku;
+                productosSeleccionados.delete(key);
+            });
         }
         moduloCalculadora.pintarTabla();
         moduloCalculadora.actualizarBotonRegistrar();
     },
 
     // ============================================
-    // SELECCIÓN: Solo críticos
+    // SELECCIÓN: Solo críticos (respeta filtro activo)
     // ============================================
     seleccionarCriticos: () => {
-        productosSeleccionados.clear();
-        sugerencias
+        // Usar sugerencias filtradas según categoría activa
+        const sugerenciasVisibles = moduloCalculadora.obtenerSugerenciasFiltradas();
+
+        // Limpiar selección actual de productos visibles
+        sugerenciasVisibles.forEach(s => {
+            const key = s.id_publicacion || s.sku;
+            productosSeleccionados.delete(key);
+        });
+
+        // Seleccionar solo críticos VISIBLES
+        sugerenciasVisibles
             .filter(s => s.nivel_riesgo === 'CRÍTICO')
             .forEach(s => {
                 const key = s.id_publicacion || s.sku;
                 productosSeleccionados.add(key);
             });
+
         moduloCalculadora.pintarTabla();
         moduloCalculadora.actualizarBotonRegistrar();
-        mostrarNotificacion(`${productosSeleccionados.size} productos críticos seleccionados`, 'info');
+
+        const filtroNombre = filtroCategoria === 'todas' ? '' : ` en categoría ${filtroCategoria}`;
+        mostrarNotificacion(`${productosSeleccionados.size} productos críticos seleccionados${filtroNombre}`, 'info');
     },
 
     // ============================================
