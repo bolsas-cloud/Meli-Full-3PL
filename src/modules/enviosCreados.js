@@ -17,6 +17,9 @@ let envioSeleccionado = null;
 let publicacionesDisponibles = [];
 let publicacionSeleccionada = null;
 
+// Estado para confirmación de exceso de cantidad
+let excesoPendiente = null; // { idx: number, delta: number }
+
 // Helper para parsear fechas como local (evita problema UTC)
 function parsearFechaLocal(fechaStr) {
     if (!fechaStr) return null;
@@ -1186,10 +1189,15 @@ export const moduloEnviosCreados = {
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <h3 class="text-lg font-bold text-gray-800">
-                                <i class="fas fa-box-open text-yellow-500 mr-2"></i>
-                                Preparando: ${envio.id_envio}
-                            </h3>
+                            <div class="flex items-center gap-4">
+                                <h3 class="text-lg font-bold text-gray-800">
+                                    <i class="fas fa-box-open text-yellow-500 mr-2"></i>
+                                    Preparando: ${envio.id_envio}
+                                </h3>
+                                <span id="header-progreso-bultos" class="px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-sm font-bold">
+                                    0 / ${envio.totalBultos} bultos
+                                </span>
+                            </div>
                             <p class="text-sm text-gray-500">
                                 Escanea los productos o usa los botones +/-
                                 <span id="indicador-guardado" class="ml-2 text-green-600 hidden">
@@ -1299,6 +1307,57 @@ export const moduloEnviosCreados = {
                                     class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors flex items-center gap-2">
                                 <i class="fas fa-check"></i>
                                 Finalizar con estas cantidades
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal de confirmación para exceder cantidad programada -->
+            <div id="modal-confirmar-exceso" class="fixed inset-0 z-50 hidden" aria-modal="true">
+                <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm"></div>
+                <div class="fixed inset-0 z-10 overflow-y-auto p-4 flex items-center justify-center">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
+                        <div class="bg-orange-500 text-white px-6 py-4 flex items-center gap-3">
+                            <i class="fas fa-exclamation-circle text-2xl"></i>
+                            <div>
+                                <h3 class="font-bold text-lg">Exceder cantidad programada</h3>
+                                <p class="text-orange-100 text-sm">Se requiere confirmación</p>
+                            </div>
+                        </div>
+                        <div class="p-6">
+                            <p class="text-gray-700 mb-4">
+                                Estás por cargar <strong>más unidades</strong> de las programadas para:
+                            </p>
+                            <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                                <p id="exceso-producto-nombre" class="font-bold text-gray-800 mb-2"></p>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Programado:</span>
+                                    <span id="exceso-cantidad-programada" class="font-bold text-blue-600"></span>
+                                </div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Actual:</span>
+                                    <span id="exceso-cantidad-actual" class="font-bold text-green-600"></span>
+                                </div>
+                                <div class="flex justify-between text-sm border-t mt-2 pt-2">
+                                    <span class="text-gray-500">Nueva cantidad:</span>
+                                    <span id="exceso-cantidad-nueva" class="font-bold text-orange-600"></span>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-500">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                ¿Confirmas que querés agregar más unidades?
+                            </p>
+                        </div>
+                        <div class="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+                            <button onclick="moduloEnviosCreados.cancelarExceso()"
+                                    class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                                Cancelar
+                            </button>
+                            <button onclick="moduloEnviosCreados.confirmarExceso()"
+                                    class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors flex items-center gap-2">
+                                <i class="fas fa-check"></i>
+                                Sí, agregar
                             </button>
                         </div>
                     </div>
@@ -1471,7 +1530,17 @@ export const moduloEnviosCreados = {
         }
 
         const prod = moduloEnviosCreados.productosPreparacion[idx];
-        prod.cantidad_escaneada = (prod.cantidad_escaneada || 0) + 1;
+        const escaneadosActual = prod.cantidad_escaneada || 0;
+        const requeridos = prod.cantidad_enviada || 0;
+
+        // Si ya alcanzó o superó el límite, pedir confirmación
+        if (escaneadosActual >= requeridos) {
+            moduloEnviosCreados.mostrarModalExceso(idx, 1);
+            document.getElementById('input-escaner').value = '';
+            return;
+        }
+
+        prod.cantidad_escaneada = escaneadosActual + 1;
         moduloEnviosCreados.ultimoSkuFoco = prod.sku;
 
         // Auto-guardar con debounce
@@ -1501,7 +1570,16 @@ export const moduloEnviosCreados = {
         if (idx === -1) return;
 
         const prod = moduloEnviosCreados.productosPreparacion[idx];
-        prod.cantidad_escaneada = Math.max(0, (prod.cantidad_escaneada || 0) + delta);
+        const escaneadosActual = prod.cantidad_escaneada || 0;
+        const requeridos = prod.cantidad_enviada || 0;
+
+        // Si se está sumando y ya alcanzó o superó el límite, pedir confirmación
+        if (delta > 0 && escaneadosActual >= requeridos) {
+            moduloEnviosCreados.mostrarModalExceso(idx, delta);
+            return;
+        }
+
+        prod.cantidad_escaneada = Math.max(0, escaneadosActual + delta);
 
         // Auto-guardar con debounce
         moduloEnviosCreados.programarAutoGuardado();
@@ -1533,6 +1611,20 @@ export const moduloEnviosCreados = {
 
         document.getElementById('resumen-completados').textContent = completados;
         document.getElementById('resumen-bultos').textContent = `${totalEscaneados} / ${totalRequeridos} bultos`;
+
+        // Actualizar también el header
+        const headerProgreso = document.getElementById('header-progreso-bultos');
+        if (headerProgreso) {
+            headerProgreso.textContent = `${totalEscaneados} / ${totalRequeridos} bultos`;
+            // Cambiar color según progreso
+            if (totalEscaneados >= totalRequeridos) {
+                headerProgreso.className = 'px-3 py-1 rounded-full bg-green-100 text-green-800 text-sm font-bold';
+            } else if (totalEscaneados > 0) {
+                headerProgreso.className = 'px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 text-sm font-bold';
+            } else {
+                headerProgreso.className = 'px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-sm font-bold';
+            }
+        }
     },
 
     actualizarFoco: (prod) => {
@@ -1733,6 +1825,66 @@ export const moduloEnviosCreados = {
         `).join('');
 
         document.getElementById('modal-finalizar-incompletos').classList.remove('hidden');
+    },
+
+    // ============================================
+    // MODAL EXCESO: Mostrar confirmación para exceder cantidad
+    // ============================================
+    mostrarModalExceso: (idx, delta) => {
+        const prod = moduloEnviosCreados.productosPreparacion[idx];
+        const escaneadosActual = prod.cantidad_escaneada || 0;
+        const requeridos = prod.cantidad_enviada || 0;
+        const nuevaCantidad = escaneadosActual + delta;
+
+        // Guardar datos del exceso pendiente
+        excesoPendiente = { idx, delta };
+
+        // Llenar datos del modal
+        document.getElementById('exceso-producto-nombre').textContent = prod.titulo || prod.sku;
+        document.getElementById('exceso-cantidad-programada').textContent = requeridos;
+        document.getElementById('exceso-cantidad-actual').textContent = escaneadosActual;
+        document.getElementById('exceso-cantidad-nueva').textContent = nuevaCantidad;
+
+        // Mostrar modal
+        document.getElementById('modal-confirmar-exceso').classList.remove('hidden');
+    },
+
+    // ============================================
+    // MODAL EXCESO: Confirmar exceso
+    // ============================================
+    confirmarExceso: () => {
+        if (!excesoPendiente) return;
+
+        const { idx, delta } = excesoPendiente;
+        const prod = moduloEnviosCreados.productosPreparacion[idx];
+
+        // Aplicar el incremento
+        prod.cantidad_escaneada = (prod.cantidad_escaneada || 0) + delta;
+        moduloEnviosCreados.ultimoSkuFoco = prod.sku;
+
+        // Auto-guardar
+        moduloEnviosCreados.programarAutoGuardado();
+
+        // Actualizar UI
+        moduloEnviosCreados.actualizarUIPreparacion(idx);
+
+        // Cerrar modal y limpiar
+        document.getElementById('modal-confirmar-exceso').classList.add('hidden');
+        excesoPendiente = null;
+
+        // Devolver foco al escáner
+        document.getElementById('input-escaner')?.focus();
+    },
+
+    // ============================================
+    // MODAL EXCESO: Cancelar exceso
+    // ============================================
+    cancelarExceso: () => {
+        document.getElementById('modal-confirmar-exceso').classList.add('hidden');
+        excesoPendiente = null;
+
+        // Devolver foco al escáner
+        document.getElementById('input-escaner')?.focus();
     },
 
     // ============================================
