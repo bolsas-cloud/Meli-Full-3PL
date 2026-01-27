@@ -16,6 +16,7 @@ let productosSeleccionados = new Set();
 // Estado para clasificación Pareto
 let clasificacionPareto = {};  // { id_publicacion: { categoria, porcentaje_acumulado } }
 let filtroCategoria = 'todas'; // 'todas', 'estrella', 'regular', 'complemento'
+let filtroTexto = ''; // Filtro de búsqueda por SKU o título
 
 export const moduloCalculadora = {
 
@@ -149,8 +150,20 @@ export const moduloCalculadora = {
                                 </button>
                             </div>
                         </div>
-                        <!-- Filtros por Clasificación Pareto -->
-                        <div class="flex items-center gap-2 flex-wrap">
+                        <!-- Buscador y Filtros -->
+                        <div class="flex items-center gap-4 flex-wrap">
+                            <!-- Input de búsqueda -->
+                            <div class="relative">
+                                <input type="text" id="input-buscar-producto"
+                                       placeholder="Buscar SKU o título..."
+                                       oninput="moduloCalculadora.filtrarPorTexto(this.value)"
+                                       class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-transparent w-64">
+                                <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                            </div>
+
+                            <span class="text-gray-300">|</span>
+
+                            <!-- Filtros por Clasificación Pareto -->
                             <span class="text-xs font-medium text-gray-500">Clasificación:</span>
                             <button onclick="moduloCalculadora.filtrarCategoria('todas')"
                                     class="filtro-cat text-xs px-3 py-1.5 rounded-lg border transition-colors"
@@ -871,16 +884,38 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // HELPER: Obtener sugerencias filtradas según categoría activa
+    // HELPER: Obtener sugerencias filtradas según categoría y texto
     // ============================================
     obtenerSugerenciasFiltradas: () => {
-        if (filtroCategoria === 'todas') {
-            return sugerencias;
+        let resultado = sugerencias;
+
+        // Filtrar por categoría Pareto
+        if (filtroCategoria !== 'todas') {
+            resultado = resultado.filter(s => {
+                const info = clasificacionPareto[s.id_publicacion];
+                return info && info.categoria === filtroCategoria;
+            });
         }
-        return sugerencias.filter(s => {
-            const info = clasificacionPareto[s.id_publicacion];
-            return info && info.categoria === filtroCategoria;
-        });
+
+        // Filtrar por texto (SKU o título)
+        if (filtroTexto.trim() !== '') {
+            const texto = filtroTexto.toLowerCase().trim();
+            resultado = resultado.filter(s => {
+                const sku = (s.sku || '').toLowerCase();
+                const titulo = (s.titulo || '').toLowerCase();
+                return sku.includes(texto) || titulo.includes(texto);
+            });
+        }
+
+        return resultado;
+    },
+
+    // ============================================
+    // FILTRO: Por texto (SKU o título)
+    // ============================================
+    filtrarPorTexto: (texto) => {
+        filtroTexto = texto;
+        moduloCalculadora.pintarTabla();
     },
 
     // ============================================
