@@ -60,88 +60,88 @@
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
 
     <!-- Sidebar -->
-    <aside class="w-64 bg-brand text-white flex-shrink-0 flex flex-col shadow-xl z-20 transition-all duration-300" id="sidebar">
+    <aside class="w-52 lg:w-64 bg-brand text-white flex-shrink-0 flex flex-col shadow-xl z-20 transition-all duration-300" id="sidebar">
 
-        <div class="p-6 border-b border-white/20">
-            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+        <div class="p-3 lg:p-6 border-b border-white/20">
+            <h1 class="text-base lg:text-xl font-bold tracking-tight flex items-center gap-2">
                 <i class="fas fa-boxes-stacked"></i>
                 <span>Meli Full 3PL</span>
             </h1>
         </div>
 
-        <nav class="flex-1 overflow-y-auto py-4">
-            <ul class="space-y-1 px-3">
+        <nav class="flex-1 overflow-y-auto py-2 lg:py-4">
+            <ul class="space-y-0.5 lg:space-y-1 px-2 lg:px-3">
 
                 <li>
-                    <a href="#" onclick="router.navegar('dashboard')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('dashboard')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-chart-line w-6 text-center mr-3"></i>
                         Dashboard
                     </a>
                 </li>
 
-                <li class="px-4 pt-4 pb-2 text-xs font-bold text-white/60 uppercase tracking-wider">
+                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
                     Logística
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('calculadora')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('calculadora')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-calculator w-6 text-center mr-3"></i>
                         Calculadora Envíos
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('envios')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('envios')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-truck-loading w-6 text-center mr-3"></i>
                         Envíos Creados
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('etiquetas')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('etiquetas')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-barcode w-6 text-center mr-3"></i>
                         Etiquetas
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('stock')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('stock')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-warehouse w-6 text-center mr-3"></i>
                         Seguimiento Stock
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('reconciliacion')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('reconciliacion')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-balance-scale w-6 text-center mr-3"></i>
                         Reconciliación 3PL
                     </a>
                 </li>
 
-                <li class="px-4 pt-4 pb-2 text-xs font-bold text-white/60 uppercase tracking-wider">
+                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
                     Gestión
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('precios')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('precios')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-tags w-6 text-center mr-3"></i>
                         Precios
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('publicaciones')" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="#" onclick="router.navegar('publicaciones')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-store w-6 text-center mr-3"></i>
                         Publicaciones
                     </a>
                 </li>
 
-                <li class="px-4 pt-4 pb-2 text-xs font-bold text-white/60 uppercase tracking-wider">
+                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
                     Herramientas
                 </li>
 
                 <li>
-                    <a href="migracion.html" target="_blank" class="nav-item flex items-center px-4 py-3 text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                    <a href="migracion.html" target="_blank" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
                         <i class="fas fa-database w-6 text-center mr-3"></i>
                         Migrar Datos
                         <i class="fas fa-external-link-alt text-xs ml-auto opacity-50"></i>
@@ -152,8 +152,8 @@
         </nav>
 
         <!-- Versión y Recarga -->
-        <div class="p-4 border-t border-white/20">
-            <div class="flex items-center justify-between text-xs">
+        <div class="p-2 lg:p-4 border-t border-white/20">
+            <div class="flex items-center justify-between text-[10px] lg:text-xs">
                 <span class="text-white/50">v1.6.0</span>
                 <button
                     onclick="limpiarCacheYRecargar()"
