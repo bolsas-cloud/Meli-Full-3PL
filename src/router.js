@@ -7,6 +7,7 @@ import { moduloDashboard } from './modules/dashboard.js';
 import { moduloStock } from './modules/stock.js';
 import { moduloPrecios } from './modules/precios.js';
 import { moduloPublicaciones } from './modules/publicaciones.js';
+import { moduloEtiquetas } from './modules/etiquetas.js';
 
 export const router = {
 
@@ -19,6 +20,7 @@ export const router = {
             'dashboard': 'Dashboard de Ventas',
             'calculadora': 'Calculadora de Envíos a Full',
             'envios': 'Envíos Creados',
+            'etiquetas': 'Etiquetado Masivo',
             'stock': 'Seguimiento de Stock',
             'precios': 'Gestión de Precios',
             'publicaciones': 'Gestión de Publicaciones',
@@ -48,6 +50,10 @@ export const router = {
 
             case 'envios':
                 moduloEnviosCreados.render(appContent);
+                break;
+
+            case 'etiquetas':
+                moduloEtiquetas.render(appContent);
                 break;
 
             case 'dashboard':
