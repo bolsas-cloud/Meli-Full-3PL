@@ -8,6 +8,7 @@ import { moduloStock } from './modules/stock.js';
 import { moduloPrecios } from './modules/precios.js';
 import { moduloPublicaciones } from './modules/publicaciones.js';
 import { moduloEtiquetas } from './modules/etiquetas.js';
+import { moduloDepositos } from './modules/depositos.js';
 
 export const router = {
 
@@ -24,7 +25,8 @@ export const router = {
             'stock': 'Seguimiento de Stock',
             'precios': 'Gestión de Precios',
             'publicaciones': 'Gestión de Publicaciones',
-            'reconciliacion': 'Reconciliación 3PL'
+            'reconciliacion': 'Reconciliación 3PL',
+            'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
 
@@ -70,6 +72,10 @@ export const router = {
 
             case 'publicaciones':
                 moduloPublicaciones.render(appContent);
+                break;
+
+            case 'depositos':
+                moduloDepositos.render(appContent);
                 break;
 
             default:

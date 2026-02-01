@@ -18,6 +18,11 @@ let clasificacionPareto = {};  // { id_publicacion: { categoria, porcentaje_acum
 let filtroCategoria = 'todas'; // 'todas', 'estrella', 'regular', 'complemento'
 let filtroTexto = ''; // Filtro de búsqueda por SKU o título
 
+// Estado para multi-destino
+let destinosDisponibles = [];  // Desde tabla destinos_envio
+let destinosSeleccionados = new Set(['FULL']);  // Por defecto solo Full
+let distribucionPorcentual = { 'FULL': 100 };  // Distribución entre destinos
+
 export const moduloCalculadora = {
 
     // ============================================
@@ -106,6 +111,39 @@ export const moduloCalculadora = {
                             Sincronizar ML
                         </button>
                     </div>
+
+                    <!-- Selector de Destinos -->
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <div class="flex flex-wrap items-center gap-4">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-2">
+                                    <i class="fas fa-warehouse text-brand mr-1"></i>
+                                    Destinos de Envío
+                                </label>
+                                <div id="destinos-checkboxes" class="flex flex-wrap gap-2">
+                                    <!-- Generado dinámicamente -->
+                                    <span class="text-sm text-gray-400">Cargando destinos...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Distribución porcentual (solo si > 1 destino) -->
+                        <div id="distribucion-container" class="hidden mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <div class="flex items-center justify-between mb-2">
+                                <p class="text-xs font-medium text-gray-600">
+                                    <i class="fas fa-percentage mr-1"></i>
+                                    Distribución automática:
+                                </p>
+                                <button onclick="moduloCalculadora.aplicarDistribucion()"
+                                        class="text-xs bg-brand text-white px-2 py-1 rounded hover:bg-brand-dark transition-colors">
+                                    Redistribuir
+                                </button>
+                            </div>
+                            <div id="distribucion-inputs" class="flex flex-wrap gap-4">
+                                <!-- Inputs generados dinámicamente -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Resumen Rápido -->
@@ -133,17 +171,24 @@ export const moduloCalculadora = {
                     <div class="p-4 border-b border-gray-100">
                         <div class="flex justify-between items-center mb-3">
                             <h3 class="font-bold text-gray-800">Sugerencias de Envío</h3>
-                            <div class="flex gap-2">
+                            <div class="flex gap-2 items-center">
                                 <button onclick="moduloCalculadora.seleccionarCriticos()"
-                                        class="text-sm bg-red-50 text-red-700 px-3 py-1 rounded-lg hover:bg-red-100 transition-colors">
+                                        class="text-sm bg-red-50 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors">
                                     Seleccionar Críticos
                                 </button>
                                 <button onclick="moduloCalculadora.seleccionarRiesgo()"
-                                        class="text-sm bg-orange-50 text-orange-700 px-3 py-1 rounded-lg hover:bg-orange-100 transition-colors">
+                                        class="text-sm bg-orange-50 text-orange-700 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition-colors">
                                     Seleccionar Riesgo
                                 </button>
+                                <span class="text-gray-300">|</span>
+                                <button onclick="moduloCalculadora.imprimirSugerencia()"
+                                        class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-100"
+                                        id="btn-imprimir" disabled>
+                                    <i class="fas fa-print"></i>
+                                    Imprimir
+                                </button>
                                 <button onclick="moduloCalculadora.registrarEnvio()"
-                                        class="text-sm bg-brand text-white px-4 py-1 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-1"
+                                        class="bg-brand text-white px-5 py-2 rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-2 font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
                                         id="btn-registrar" disabled>
                                     <i class="fas fa-truck"></i>
                                     Registrar Envío
@@ -192,19 +237,19 @@ export const moduloCalculadora = {
                         <table class="min-w-full divide-y divide-gray-100">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 40px;">
+                                    <th class="px-1 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 32px;">
                                         <input type="checkbox" id="check-all" onchange="moduloCalculadora.toggleAll(this)">
                                     </th>
-                                    <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase" style="width: 50px;" title="Clasificación Pareto">Cat</th>
-                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase" style="width: 150px;">SKU</th>
-                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">V/Día</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">Stock</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 70px;">Tráns</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 60px;" title="Stock de Seguridad">Seg</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 60px;">Cob</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase" style="width: 80px;">Enviar</th>
-                                    <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase" style="width: 90px;">Riesgo</th>
+                                    <th class="px-1 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 32px;" title="Clasificación Pareto">Cat</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase" style="width: 120px;">SKU</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase">Título</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 50px;">V/Día</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 50px;">Stock</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 45px;">Tráns</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 40px;" title="Stock de Seguridad">Seg</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 45px;">Cob</th>
+                                    <th class="px-2 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 140px;">Enviar</th>
+                                    <th class="px-2 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 70px;">Riesgo</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-sugerencias" class="divide-y divide-gray-100 text-sm">
@@ -259,6 +304,9 @@ export const moduloCalculadora = {
 
         // Cargar configuración guardada
         await moduloCalculadora.cargarConfig();
+
+        // Cargar destinos de envío
+        await moduloCalculadora.cargarDestinos();
 
         // Activar filtro "todas" por defecto
         document.querySelector('.filtro-cat[data-categoria="todas"]')?.classList.add('active');
@@ -333,6 +381,254 @@ export const moduloCalculadora = {
     },
 
     // ============================================
+    // CARGAR: Destinos de envío desde Supabase
+    // ============================================
+    cargarDestinos: async () => {
+        try {
+            const { data, error } = await supabase
+                .from('destinos_envio')
+                .select('*')
+                .eq('activo', true)
+                .order('tipo', { ascending: true });  // 'meli' primero
+
+            if (error) throw error;
+
+            destinosDisponibles = data || [];
+
+            // Si hay destinos, renderizar checkboxes
+            if (destinosDisponibles.length > 0) {
+                moduloCalculadora.renderizarCheckboxesDestinos();
+            } else {
+                // Fallback: solo mostrar Full hardcodeado
+                const container = document.getElementById('destinos-checkboxes');
+                if (container) {
+                    container.innerHTML = `
+                        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-brand-light border-brand text-brand-dark cursor-pointer">
+                            <input type="checkbox" value="FULL" checked disabled class="w-4 h-4 text-brand rounded">
+                            <span class="text-sm font-medium">MercadoLibre Full</span>
+                        </label>
+                        <span class="text-xs text-gray-400">(Ejecuta la migración SQL para habilitar multi-destino)</span>
+                    `;
+                }
+            }
+
+            console.log('Destinos cargados:', destinosDisponibles.length);
+
+        } catch (error) {
+            console.error('Error cargando destinos:', error);
+            // Si la tabla no existe aún, mostrar fallback
+            const container = document.getElementById('destinos-checkboxes');
+            if (container) {
+                container.innerHTML = `
+                    <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-brand-light border-brand text-brand-dark">
+                        <input type="checkbox" value="FULL" checked disabled class="w-4 h-4 text-brand rounded">
+                        <span class="text-sm font-medium">MercadoLibre Full</span>
+                    </label>
+                `;
+            }
+        }
+    },
+
+    // ============================================
+    // RENDERIZAR: Checkboxes de destinos
+    // ============================================
+    renderizarCheckboxesDestinos: () => {
+        const container = document.getElementById('destinos-checkboxes');
+        if (!container) return;
+
+        container.innerHTML = destinosDisponibles.map(d => {
+            const isSelected = destinosSeleccionados.has(d.id_destino);
+            const bgClass = isSelected ? 'bg-brand-light border-brand text-brand-dark' : 'bg-white border-gray-200 text-gray-600';
+            const iconClass = d.tipo === 'meli' ? 'fa-brands fa-meli text-yellow-500' : 'fa-warehouse text-blue-500';
+
+            return `
+                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border ${bgClass} cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input type="checkbox"
+                           value="${d.id_destino}"
+                           ${isSelected ? 'checked' : ''}
+                           onchange="moduloCalculadora.toggleDestino('${d.id_destino}')"
+                           class="w-4 h-4 text-brand rounded focus:ring-brand">
+                    <i class="fas ${iconClass}"></i>
+                    <span class="text-sm font-medium">${d.nombre}</span>
+                </label>
+            `;
+        }).join('');
+
+        moduloCalculadora.actualizarDistribucionUI();
+    },
+
+    // ============================================
+    // TOGGLE: Seleccionar/deseleccionar destino
+    // ============================================
+    toggleDestino: (idDestino) => {
+        if (destinosSeleccionados.has(idDestino)) {
+            // No permitir deseleccionar si es el único
+            if (destinosSeleccionados.size <= 1) {
+                mostrarNotificacion('Debe haber al menos un destino seleccionado', 'warning');
+                // Re-check el checkbox
+                const checkbox = document.querySelector(`input[value="${idDestino}"]`);
+                if (checkbox) checkbox.checked = true;
+                return;
+            }
+            destinosSeleccionados.delete(idDestino);
+            delete distribucionPorcentual[idDestino];
+        } else {
+            destinosSeleccionados.add(idDestino);
+        }
+
+        // Recalcular distribución equitativa
+        moduloCalculadora.recalcularDistribucion();
+        moduloCalculadora.renderizarCheckboxesDestinos();
+
+        // Si ya hay sugerencias calculadas, recalcular cantidades por destino (silencioso)
+        if (sugerencias.length > 0) {
+            moduloCalculadora.aplicarDistribucion(true);
+        }
+    },
+
+    // ============================================
+    // RECALCULAR: Distribución porcentual equitativa
+    // ============================================
+    recalcularDistribucion: () => {
+        const destinos = [...destinosSeleccionados];
+        const pctCadaUno = Math.floor(100 / destinos.length);
+        const resto = 100 - (pctCadaUno * destinos.length);
+
+        distribucionPorcentual = {};
+        destinos.forEach((d, i) => {
+            // El primero recibe el resto para que sume 100%
+            distribucionPorcentual[d] = pctCadaUno + (i === 0 ? resto : 0);
+        });
+    },
+
+    // ============================================
+    // ACTUALIZAR: UI de distribución porcentual
+    // ============================================
+    actualizarDistribucionUI: () => {
+        const container = document.getElementById('distribucion-container');
+        const inputsContainer = document.getElementById('distribucion-inputs');
+
+        if (!container || !inputsContainer) return;
+
+        // Mostrar solo si hay 2+ destinos seleccionados
+        if (destinosSeleccionados.size <= 1) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        container.classList.remove('hidden');
+
+        // Generar inputs para cada destino
+        const destinos = [...destinosSeleccionados];
+        inputsContainer.innerHTML = destinos.map(idDestino => {
+            const destino = destinosDisponibles.find(d => d.id_destino === idDestino);
+            const nombre = destino ? destino.nombre : idDestino;
+            const pct = distribucionPorcentual[idDestino] || 0;
+
+            return `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-600 w-24 truncate" title="${nombre}">${nombre}:</span>
+                    <input type="number" min="0" max="100" value="${pct}"
+                           data-destino="${idDestino}"
+                           onchange="moduloCalculadora.cambiarDistribucion('${idDestino}', this.value)"
+                           class="w-16 text-center text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-brand focus:border-transparent">
+                    <span class="text-xs text-gray-400">%</span>
+                </div>
+            `;
+        }).join('');
+    },
+
+    // ============================================
+    // CAMBIAR: Distribución de un destino (auto-ajusta el otro)
+    // ============================================
+    cambiarDistribucion: (idDestino, valor) => {
+        const pct = Math.max(0, Math.min(100, parseInt(valor) || 0));
+        distribucionPorcentual[idDestino] = pct;
+
+        // Si hay exactamente 2 destinos, ajustar el otro automáticamente
+        const destinos = [...destinosSeleccionados];
+        if (destinos.length === 2) {
+            const otroDestino = destinos.find(d => d !== idDestino);
+            if (otroDestino) {
+                const complemento = 100 - pct;
+                distribucionPorcentual[otroDestino] = complemento;
+
+                // Actualizar el input del otro destino en la UI
+                const inputOtro = document.querySelector(`input[data-destino="${otroDestino}"]`);
+                if (inputOtro) {
+                    inputOtro.value = complemento;
+                }
+            }
+        }
+    },
+
+    // ============================================
+    // APLICAR: Distribución a todas las sugerencias
+    // silencioso: si es true, no muestra notificaciones (uso interno)
+    // ============================================
+    aplicarDistribucion: (silencioso = false) => {
+        console.log(`📊 aplicarDistribucion(silencioso=${silencioso})`);
+        console.log('  distribucionPorcentual:', JSON.stringify(distribucionPorcentual));
+        console.log('  sugerencias.length:', sugerencias.length);
+
+        if (sugerencias.length === 0) {
+            if (!silencioso) mostrarNotificacion('Primero calcula las sugerencias', 'warning');
+            return;
+        }
+
+        const suma = Object.values(distribucionPorcentual).reduce((a, b) => a + b, 0);
+        if (suma !== 100) {
+            console.warn(`⚠️ Distribución suma ${suma}%, debe ser 100%`);
+            if (!silencioso) mostrarNotificacion(`La distribución suma ${suma}%, debe ser 100%`, 'warning');
+            return;
+        }
+
+        // Aplicar distribución a cada sugerencia
+        sugerencias.forEach(s => {
+            const cantidadTotal = s.cantidad_a_enviar || 0;
+            s.cantidades_por_destino = moduloCalculadora.calcularDistribucionCantidad(cantidadTotal);
+        });
+
+        console.log('  ✅ Distribución aplicada a', sugerencias.length, 'sugerencias');
+        // Mostrar ejemplo de primeras 3 sugerencias
+        sugerencias.slice(0, 3).forEach(s => {
+            console.log(`    ${s.sku}: cantidad_a_enviar=${s.cantidad_a_enviar}, cantidades_por_destino=`, JSON.stringify(s.cantidades_por_destino));
+        });
+
+        moduloCalculadora.pintarTabla();
+        if (!silencioso) mostrarNotificacion('Distribución aplicada', 'success');
+    },
+
+    // ============================================
+    // CALCULAR: Distribución de una cantidad
+    // ============================================
+    calcularDistribucionCantidad: (cantidadTotal) => {
+        const resultado = {};
+        const destinos = [...destinosSeleccionados];
+        let restante = cantidadTotal;
+
+        // Debug: verificar que los datos son correctos
+        if (destinos.length === 0) {
+            console.warn('⚠️ calcularDistribucionCantidad: No hay destinos seleccionados!');
+            return resultado;
+        }
+
+        destinos.forEach((destino, idx) => {
+            const pct = distribucionPorcentual[destino] || 0;
+            if (idx === destinos.length - 1) {
+                // Último destino recibe el restante (evita errores de redondeo)
+                resultado[destino] = Math.max(0, restante);
+            } else {
+                const cantidad = Math.round(cantidadTotal * (pct / 100));
+                resultado[destino] = cantidad;
+                restante -= cantidad;
+            }
+        });
+
+        return resultado;
+    },
+
+    // ============================================
     // CALCULAR: Sugerencias de envío (preferencia: RPC en DB)
     // Flujo: 1) Sincronizar ML → 2) Calcular
     // ============================================
@@ -355,6 +651,9 @@ export const moduloCalculadora = {
             `;
             return;
         }
+
+        // Mostrar toast de inicio
+        mostrarNotificacion('Calculando sugerencias...', 'info');
 
         // ========== PASO 1: Sincronizar datos desde ML ==========
         tbody.innerHTML = `
@@ -461,6 +760,30 @@ export const moduloCalculadora = {
             filtroCategoria = 'todas';
             document.querySelectorAll('.filtro-cat').forEach(btn => btn.classList.remove('active'));
             document.querySelector('.filtro-cat[data-categoria="todas"]')?.classList.add('active');
+
+            // Inicializar cantidades_por_destino automáticamente si hay múltiples destinos
+            console.log(`🎯 Inicializando cantidades_por_destino (destinos: ${destinosSeleccionados.size})`);
+            console.log('  destinosSeleccionados:', [...destinosSeleccionados]);
+            console.log('  distribucionPorcentual:', JSON.stringify(distribucionPorcentual));
+
+            if (destinosSeleccionados.size > 1) {
+                sugerencias.forEach(s => {
+                    s.cantidades_por_destino = moduloCalculadora.calcularDistribucionCantidad(s.cantidad_a_enviar || 0);
+                });
+                console.log('  Aplicada distribución multi-destino');
+            } else if (destinosSeleccionados.size === 1) {
+                // Un solo destino: inicializar con el destino seleccionado
+                const unicoDestino = [...destinosSeleccionados][0];
+                sugerencias.forEach(s => {
+                    s.cantidades_por_destino = { [unicoDestino]: s.cantidad_a_enviar || 0 };
+                });
+                console.log(`  Aplicada distribución único destino: ${unicoDestino}`);
+            }
+
+            // Mostrar ejemplo de primeras 3 sugerencias
+            sugerencias.slice(0, 3).forEach(s => {
+                console.log(`  ${s.sku}: cantidad_a_enviar=${s.cantidad_a_enviar}, cantidades_por_destino=`, JSON.stringify(s.cantidades_por_destino));
+            });
 
             // Pintar tabla
             moduloCalculadora.pintarTabla();
@@ -651,46 +974,102 @@ export const moduloCalculadora = {
 
         // Usar id_publicacion como clave única (fallback a sku para datos demo)
         // Columnas: Check, Cat, SKU, Título, V, Stock Full, En Tránsito, Stock Seg., Cobertura, A ENVIAR, Riesgo
+        const multiDestino = destinosSeleccionados.size > 1;
+
         tbody.innerHTML = sugerenciasFiltradas.map(s => {
             const key = s.id_publicacion || s.sku;
             const cat = getCategoria(s.id_publicacion);
+
+            // Generar celda de cantidad según destinos
+            let celdaCantidad = '';
+            if (multiDestino) {
+                // Múltiples destinos: mostrar inputs por destino
+                const inputsDestinos = [...destinosSeleccionados].map(idDestino => {
+                    const destino = destinosDisponibles.find(d => d.id_destino === idDestino);
+                    const nombreCorto = destino ? (destino.tipo === 'meli' ? 'Full' : destino.nombre.substring(0, 8)) : idDestino;
+                    const cantidad = s.cantidades_por_destino?.[idDestino] || 0;
+                    const bgColor = destino?.tipo === 'meli' ? 'bg-yellow-50 border-yellow-300' : 'bg-blue-50 border-blue-300';
+
+                    return `
+                        <div class="flex items-center gap-1" title="${destino?.nombre || idDestino}">
+                            <span class="text-[10px] text-gray-500 w-12 truncate">${nombreCorto}</span>
+                            <input type="number"
+                                   value="${cantidad}"
+                                   min="0"
+                                   class="w-14 text-right text-sm border ${bgColor} rounded px-1.5 py-1"
+                                   onchange="moduloCalculadora.actualizarCantidadDestino('${key}', '${idDestino}', this.value)">
+                        </div>
+                    `;
+                }).join('');
+
+                celdaCantidad = `
+                    <td class="px-2 py-1">
+                        <div class="flex flex-col gap-1">
+                            ${inputsDestinos}
+                        </div>
+                    </td>
+                `;
+            } else {
+                // Un solo destino: input simple
+                celdaCantidad = `
+                    <td class="px-2 py-2 text-center">
+                        <input type="number"
+                               value="${s.cantidad_a_enviar || 0}"
+                               min="0"
+                               class="w-20 text-right text-sm border border-gray-300 rounded px-2 py-1"
+                               onchange="moduloCalculadora.actualizarCantidad('${key}', this.value)">
+                    </td>
+                `;
+            }
+
             return `
             <tr class="hover:bg-gray-50 transition-colors ${productosSeleccionados.has(key) ? 'bg-brand-light' : ''}">
-                <td class="px-3 py-3">
+                <td class="px-1 py-2 text-center">
                     <input type="checkbox"
                            ${productosSeleccionados.has(key) ? 'checked' : ''}
                            onchange="moduloCalculadora.toggleSeleccion('${key}')">
                 </td>
-                <td class="px-3 py-3 text-center text-lg" title="${cat.tooltip}">
+                <td class="px-1 py-2 text-center text-base" title="${cat.tooltip}">
                     <span class="${cat.clase}">${cat.emoji}</span>
                 </td>
-                <td class="px-3 py-3 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
-                <td class="px-3 py-3">
+                <td class="px-2 py-2 font-mono text-xs text-gray-600" title="${s.id_publicacion || ''}">${s.sku}</td>
+                <td class="px-2 py-2">
                     <p class="text-sm" title="${s.titulo}">${s.titulo || '-'}</p>
                 </td>
-                <td class="px-4 py-3 text-right text-sm font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
-                <td class="px-4 py-3 text-right text-sm">${s.stock_actual_full || 0}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-500">${s.stock_en_transito || 0}</td>
-                <td class="px-4 py-3 text-right text-sm">${s.stock_seguridad || 0}</td>
-                <td class="px-4 py-3 text-right text-sm">
+                <td class="px-1 py-2 text-right text-sm font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
+                <td class="px-1 py-2 text-right text-sm">${s.stock_actual_full || 0}</td>
+                <td class="px-1 py-2 text-right text-sm text-gray-500">${s.stock_en_transito || 0}</td>
+                <td class="px-1 py-2 text-right text-sm">${s.stock_seguridad || 0}</td>
+                <td class="px-1 py-2 text-right text-sm">
                     <span class="${(s.dias_cobertura || 0) < 7 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
                         ${s.dias_cobertura === Infinity ? '∞' : (s.dias_cobertura || 0).toFixed(1)}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-right">
-                    <input type="number"
-                           value="${s.cantidad_a_enviar || 0}"
-                           min="0"
-                           class="w-16 text-right text-sm border border-gray-300 rounded px-2 py-1"
-                           onchange="moduloCalculadora.actualizarCantidad('${key}', this.value)">
-                </td>
-                <td class="px-3 py-3 text-center">
-                    <span class="px-2 py-1 rounded-full text-xs font-bold ${colorRiesgo(s.nivel_riesgo)}">
+                ${celdaCantidad}
+                <td class="px-2 py-2 text-center">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-bold ${colorRiesgo(s.nivel_riesgo)}">
                         ${s.nivel_riesgo || 'N/A'}
                     </span>
                 </td>
             </tr>
         `}).join('');
+    },
+
+    // ============================================
+    // ACTUALIZAR: Cantidad por destino específico
+    // ============================================
+    actualizarCantidadDestino: (key, idDestino, cantidad) => {
+        const idx = sugerencias.findIndex(s => (s.id_publicacion || s.sku) === key);
+        if (idx >= 0) {
+            if (!sugerencias[idx].cantidades_por_destino) {
+                sugerencias[idx].cantidades_por_destino = {};
+            }
+            sugerencias[idx].cantidades_por_destino[idDestino] = parseInt(cantidad) || 0;
+
+            // Recalcular cantidad total
+            const total = Object.values(sugerencias[idx].cantidades_por_destino).reduce((a, b) => a + b, 0);
+            sugerencias[idx].cantidad_a_enviar = total;
+        }
     },
 
     // ============================================
@@ -1032,15 +1411,126 @@ export const moduloCalculadora = {
     },
 
     // ============================================
-    // ACTUALIZAR: Estado del botón registrar
+    // ACTUALIZAR: Estado del botón registrar e imprimir
     // ============================================
     actualizarBotonRegistrar: () => {
-        const btn = document.getElementById('btn-registrar');
-        btn.disabled = productosSeleccionados.size === 0;
+        const btnRegistrar = document.getElementById('btn-registrar');
+        const btnImprimir = document.getElementById('btn-imprimir');
+        const haySugerencias = sugerencias.length > 0;
+        const haySeleccion = productosSeleccionados.size > 0;
+
+        // Solo habilitar si hay sugerencias calculadas Y productos seleccionados
+        const habilitado = haySugerencias && haySeleccion;
+
+        if (btnRegistrar) btnRegistrar.disabled = !habilitado;
+        if (btnImprimir) btnImprimir.disabled = !habilitado;
     },
 
     // ============================================
-    // REGISTRAR: Crear envío con productos seleccionados
+    // IMPRIMIR: Generar PDF de sugerencias seleccionadas (sin registrar)
+    // ============================================
+    imprimirSugerencia: () => {
+        if (productosSeleccionados.size === 0) {
+            mostrarNotificacion('Selecciona al menos un producto', 'warning');
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+
+        // Header
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Sugerencia de Envío', 105, 15, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        const fechaHoy = new Date().toLocaleDateString('es-AR');
+        const fechaColecta = document.getElementById('param-fecha-colecta')?.value || 'No definida';
+        doc.text(`Fecha: ${fechaHoy}`, 14, 25);
+        doc.text(`Fecha de colecta: ${fechaColecta}`, 14, 30);
+
+        // Destinos seleccionados
+        const destinosNombres = [...destinosSeleccionados].map(id => {
+            const d = destinosDisponibles.find(dest => dest.id_destino === id);
+            return d ? d.nombre : id;
+        }).join(', ');
+        doc.text(`Destinos: ${destinosNombres}`, 14, 35);
+        doc.text(`Distribución: ${Object.entries(distribucionPorcentual).map(([k,v]) => `${k}: ${v}%`).join(' | ')}`, 14, 40);
+
+        // Filtrar productos seleccionados
+        const productosSeleccionadosArray = sugerencias.filter(s => {
+            const key = s.id_publicacion || s.sku;
+            return productosSeleccionados.has(key);
+        });
+
+        // Preparar datos para la tabla
+        const multiDestino = destinosSeleccionados.size > 1;
+        let columns = ['SKU', 'Título', 'V/Día', 'Stock', 'Sugerido'];
+
+        if (multiDestino) {
+            [...destinosSeleccionados].forEach(id => {
+                const d = destinosDisponibles.find(dest => dest.id_destino === id);
+                columns.push(d ? d.nombre.substring(0, 10) : id);
+            });
+        }
+
+        const rows = productosSeleccionadosArray.map(s => {
+            const row = [
+                s.sku,
+                (s.titulo || '').substring(0, 30),
+                (s.ventas_dia || 0).toFixed(1),
+                s.stock_actual_full || 0,
+                s.cantidad_a_enviar || 0
+            ];
+
+            if (multiDestino) {
+                [...destinosSeleccionados].forEach(id => {
+                    row.push(s.cantidades_por_destino?.[id] || 0);
+                });
+            }
+
+            return row;
+        });
+
+        // Generar tabla
+        doc.autoTable({
+            head: [columns],
+            body: rows,
+            startY: 48,
+            styles: { fontSize: 8, cellPadding: 1.5 },
+            headStyles: { fillColor: [78, 171, 135] },
+            columnStyles: {
+                0: { cellWidth: 35 },
+                1: { cellWidth: 45 },
+                2: { cellWidth: 15, halign: 'right' },
+                3: { cellWidth: 15, halign: 'right' },
+                4: { cellWidth: 18, halign: 'right' }
+            }
+        });
+
+        // Totales
+        const totalProductos = productosSeleccionadosArray.length;
+        const totalUnidades = productosSeleccionadosArray.reduce((sum, s) => sum + (s.cantidad_a_enviar || 0), 0);
+        const finalY = doc.lastAutoTable.finalY + 5;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Total: ${totalProductos} productos, ${totalUnidades} unidades`, 14, finalY);
+
+        // Footer
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(150);
+        doc.text('Documento generado por Meli Full 3PL - Solo para referencia (no registrado)', 105, 285, { align: 'center' });
+
+        // Abrir PDF en nueva pestaña
+        window.open(doc.output('bloburl'), '_blank');
+        mostrarNotificacion('PDF de sugerencia generado', 'success');
+    },
+
+    // ============================================
+    // REGISTRAR: Crear envío(s) con productos seleccionados
+    // Crea un envío por cada destino seleccionado
     // ============================================
     registrarEnvio: async () => {
         if (productosSeleccionados.size === 0) {
@@ -1048,49 +1538,199 @@ export const moduloCalculadora = {
             return;
         }
 
-        try {
-            const idEnvio = generarId('ENV');
+        const fechaColecta = document.getElementById('param-fecha-colecta')?.value || null;
+        const destinos = [...destinosSeleccionados];
+        const multiDestino = destinos.length > 1;
+        const enviosCreados = [];
 
-            // Crear registro de envío
-            const { error: errorEnvio } = await supabase
-                .from('registro_envios_full')
-                .insert({
-                    id_envio: idEnvio,
-                    estado: 'Borrador',
-                    fecha_creacion: new Date().toISOString()
+        // ========== DEBUG: Estado inicial ==========
+        console.group('🚀 registrarEnvio - DEBUG');
+        console.log('Destinos seleccionados:', destinos);
+        console.log('Es multi-destino:', multiDestino);
+        console.log('Distribución porcentual:', JSON.stringify(distribucionPorcentual));
+        console.log('Productos seleccionados:', [...productosSeleccionados]);
+        console.log('Total sugerencias:', sugerencias.length);
+
+        // Mostrar estado de cantidades_por_destino para productos seleccionados
+        const seleccionadas = sugerencias.filter(s => {
+            const key = s.id_publicacion || s.sku;
+            return productosSeleccionados.has(key);
+        });
+        console.log('Sugerencias seleccionadas:');
+        seleccionadas.forEach(s => {
+            console.log(`  SKU: ${s.sku}, cantidad_a_enviar: ${s.cantidad_a_enviar}, cantidades_por_destino:`,
+                JSON.stringify(s.cantidades_por_destino));
+        });
+        console.groupEnd();
+        // ========== FIN DEBUG ==========
+
+        try {
+            // Intentar usar la nueva tabla unificada primero
+            let usarTablaNueva = true;
+
+            for (const idDestino of destinos) {
+                console.group(`📦 Procesando destino: ${idDestino}`);
+
+                // Filtrar productos con cantidad > 0 para este destino
+                const productosDestino = sugerencias.filter(s => {
+                    const key = s.id_publicacion || s.sku;
+                    if (!productosSeleccionados.has(key)) return false;
+
+                    if (multiDestino) {
+                        // Si cantidades_por_destino no está inicializado, calcularlo al vuelo
+                        if (!s.cantidades_por_destino) {
+                            console.warn(`⚠️ ${s.sku}: cantidades_por_destino no inicializado, calculando...`);
+                            s.cantidades_por_destino = moduloCalculadora.calcularDistribucionCantidad(s.cantidad_a_enviar || 0);
+                        }
+                        // Verificar que hay cantidad para este destino
+                        const cantidadDestino = s.cantidades_por_destino?.[idDestino] || 0;
+                        console.log(`  ${s.sku}: cantidades_por_destino[${idDestino}] = ${cantidadDestino}`);
+                        return cantidadDestino > 0;
+                    } else {
+                        // Un solo destino: usar cantidad_a_enviar
+                        return (s.cantidad_a_enviar || 0) > 0;
+                    }
                 });
 
-            if (errorEnvio) throw errorEnvio;
+                console.log(`Productos filtrados para ${idDestino}: ${productosDestino.length}`);
 
-            // Crear detalles del envío (usando id_publicacion como clave)
-            const detalles = sugerencias
-                .filter(s => {
-                    const key = s.id_publicacion || s.sku;
-                    return productosSeleccionados.has(key);
-                })
-                .map(s => ({
-                    id_envio: idEnvio,
-                    id_publicacion: s.id_publicacion || null,
-                    sku: s.sku,
-                    cantidad_enviada: s.cantidad_a_enviar || 0
-                }));
+                if (productosDestino.length === 0) continue;
 
-            const { error: errorDetalle } = await supabase
-                .from('detalle_envios_full')
-                .insert(detalles);
+                const idEnvio = generarId('ENV');
 
-            if (errorDetalle) throw errorDetalle;
+                // Parsear fecha como local (no UTC) para evitar desfasaje de timezone
+                let fechaColectaISO = null;
+                if (fechaColecta) {
+                    if (typeof fechaColecta === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaColecta)) {
+                        const [año, mes, dia] = fechaColecta.split('-').map(Number);
+                        fechaColectaISO = new Date(año, mes - 1, dia, 12, 0, 0).toISOString();
+                    } else {
+                        fechaColectaISO = new Date(fechaColecta).toISOString();
+                    }
+                }
 
-            mostrarNotificacion(`Envío ${idEnvio} creado con ${detalles.length} productos`, 'success');
+                // Intentar insertar en tabla nueva (registro_envios)
+                if (usarTablaNueva) {
+                    const { error: errorEnvio } = await supabase
+                        .from('registro_envios')
+                        .insert({
+                            id_envio: idEnvio,
+                            id_destino: idDestino,
+                            estado: 'Borrador',
+                            fecha_creacion: new Date().toISOString(),
+                            fecha_colecta: fechaColectaISO
+                        });
 
-            // Limpiar selección
+                    if (errorEnvio) {
+                        if (errorEnvio.code === '42P01' || errorEnvio.message?.includes('does not exist')) {
+                            usarTablaNueva = false;
+                        } else {
+                            throw errorEnvio;
+                        }
+                    }
+                }
+
+                // Fallback a tabla legacy si es necesario
+                if (!usarTablaNueva) {
+                    const { error: errorEnvio } = await supabase
+                        .from('registro_envios_full')
+                        .insert({
+                            id_envio: idEnvio,
+                            estado: 'Borrador',
+                            fecha_creacion: new Date().toISOString(),
+                            fecha_colecta: fechaColectaISO
+                        });
+
+                    if (errorEnvio) throw errorEnvio;
+                }
+
+                // Crear detalles del envío
+                const detalles = productosDestino.map(s => {
+                    const cantidad = multiDestino
+                        ? (s.cantidades_por_destino?.[idDestino] || 0)
+                        : (s.cantidad_a_enviar || 0);
+
+                    return {
+                        id_envio: idEnvio,
+                        id_publicacion: s.id_publicacion || null,
+                        sku: s.sku,
+                        cantidad_sugerida: s.cantidad_a_enviar || 0,
+                        cantidad_enviada: cantidad
+                    };
+                });
+
+                // ========== DEBUG: Detalles a insertar ==========
+                console.log(`Detalles a insertar para ${idDestino} (${idEnvio}):`);
+                detalles.forEach(d => {
+                    console.log(`  ${d.sku}: cantidad_enviada=${d.cantidad_enviada}, cantidad_sugerida=${d.cantidad_sugerida}`);
+                });
+                const totalUnidades = detalles.reduce((sum, d) => sum + d.cantidad_enviada, 0);
+                console.log(`Total: ${detalles.length} productos, ${totalUnidades} unidades`);
+                // ========== FIN DEBUG ==========
+
+                // Insertar detalles en tabla correspondiente
+                const tablaDetalles = usarTablaNueva ? 'detalle_envios' : 'detalle_envios_full';
+                const { error: errorDetalle } = await supabase
+                    .from(tablaDetalles)
+                    .insert(detalles);
+
+                if (errorDetalle) {
+                    // Si tabla nueva no existe, intentar con legacy
+                    if (errorDetalle.code === '42P01' || errorDetalle.message?.includes('does not exist')) {
+                        const { error: errorDetalleLegacy } = await supabase
+                            .from('detalle_envios_full')
+                            .insert(detalles.map(d => ({
+                                id_envio: d.id_envio,
+                                id_publicacion: d.id_publicacion,
+                                sku: d.sku,
+                                cantidad_enviada: d.cantidad_enviada
+                            })));
+
+                        if (errorDetalleLegacy) throw errorDetalleLegacy;
+                    } else {
+                        throw errorDetalle;
+                    }
+                }
+
+                console.log(`✅ Envío ${idEnvio} insertado correctamente`);
+                console.groupEnd(); // Cerrar grupo del destino
+
+                const destino = destinosDisponibles.find(d => d.id_destino === idDestino);
+                enviosCreados.push({
+                    id: idEnvio,
+                    destino: destino?.nombre || idDestino,
+                    productos: detalles.length
+                });
+            }
+
+            // ========== DEBUG: Resumen final ==========
+            console.group('📋 RESUMEN FINAL registrarEnvio');
+            console.log('Envíos creados:', enviosCreados.length);
+            enviosCreados.forEach(e => {
+                console.log(`  ${e.id} → ${e.destino}: ${e.productos} productos`);
+            });
+            console.groupEnd();
+            // ========== FIN DEBUG ==========
+
+            // Mostrar resumen
+            if (enviosCreados.length === 1) {
+                mostrarNotificacion(`Envío ${enviosCreados[0].id} creado con ${enviosCreados[0].productos} productos`, 'success');
+            } else if (enviosCreados.length > 1) {
+                const resumen = enviosCreados.map(e => `${e.destino}: ${e.productos}`).join(', ');
+                mostrarNotificacion(`${enviosCreados.length} envíos creados (${resumen})`, 'success');
+            } else {
+                mostrarNotificacion('No se crearon envíos (sin productos con cantidad > 0)', 'warning');
+            }
+
+            // Limpiar selección y sugerencias
             productosSeleccionados.clear();
+            sugerencias = [];
             moduloCalculadora.pintarTabla();
             moduloCalculadora.actualizarBotonRegistrar();
 
         } catch (error) {
-            console.error('Error registrando envío:', error);
-            mostrarNotificacion('Error al registrar envío', 'error');
+            console.error('❌ Error registrando envío:', error);
+            mostrarNotificacion('Error al registrar envío: ' + error.message, 'error');
         }
     },
 

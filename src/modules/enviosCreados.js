@@ -6,12 +6,17 @@
 // - Estados: En Preparación, Despachado, Recibido
 // ============================================
 
-import { supabase } from '../config.js';
+import { supabase, supabaseRRHH, supabaseProduccion } from '../config.js';
 import { mostrarNotificacion, confirmarAccion, formatearFecha, fechaLocalISO, generarId } from '../utils.js';
 
 // Estado local del módulo
 let enviosCache = [];
 let envioSeleccionado = null;
+let filtroDestino = 'todos';  // 'todos', 'meli', 'externo'
+let destinosCache = {};       // { id_destino: { nombre, tipo, ... } }
+let usandoTablasNuevas = true; // Flag para saber si usamos tablas nuevas o legacy
+let vistaActual = 'recientes'; // 'recientes' | 'historicos'
+let historicosCache = [];      // Cache separado para históricos (sin detalles)
 
 // Estado para modal de agregar producto
 let publicacionesDisponibles = [];
@@ -19,6 +24,112 @@ let publicacionSeleccionada = null;
 
 // Estado para confirmación de exceso de cantidad
 let excesoPendiente = null; // { idx: number, delta: number }
+
+// ============================================
+// ESTADO: Integración RRHH (preparaciones)
+// ============================================
+let colaboradoresCache = [];      // Lista de colaboradores de RRHH
+let tareasEnvioCache = [];        // Tareas con etapa="ENVIO" de Producción
+let consumiblesCache = [];        // Productos tipo EMPAQUE de Producción
+let preparacionRRHH = null;       // Registro de preparacion en RRHH
+let tareasSeleccionadas = [];     // Tareas marcadas en UI con sus colaboradores
+let consumiblesUsados = {};       // { producto_id: cantidad }
+let cantidadBultosPrep = 0;       // Cantidad de bultos ingresada
+
+// ============================================
+// HELPERS: Integración RRHH
+// ============================================
+
+// Sincronizar envío con tabla preparaciones en RRHH
+async function sincronizarConRRHH(envio, accion = 'crear') {
+    try {
+        const destino = envio.destino || destinosCache[envio.id_destino];
+        const destinoNombre = destino?.nombre || 'Desconocido';
+        const destinoTipo = destino?.tipo || 'meli';
+
+        const totalUnidades = envio.productos?.reduce((sum, p) => sum + (p.cantidad_enviada || 0), 0) || 0;
+
+        if (accion === 'crear') {
+            // Crear o actualizar registro en preparaciones
+            const { error } = await supabaseRRHH.from('preparaciones').upsert({
+                tipo: 'ENVIO_MELI',
+                id_origen: envio.id_envio,
+                codigo_visible: envio.id_envio,
+                destino_nombre: destinoNombre,
+                destino_tipo: destinoTipo,
+                total_items: envio.productos?.length || 0,
+                total_unidades: totalUnidades,
+                estado: 'PENDIENTE'
+            }, { onConflict: 'tipo,id_origen' });
+
+            if (error) {
+                console.error('Error sincronizando con RRHH:', error);
+            }
+        } else if (accion === 'cancelar') {
+            // Marcar como cancelado
+            await supabaseRRHH.from('preparaciones')
+                .update({ estado: 'CANCELADO' })
+                .eq('tipo', 'ENVIO_MELI')
+                .eq('id_origen', envio.id_envio);
+        }
+    } catch (err) {
+        console.error('Error en sincronización RRHH:', err);
+    }
+}
+
+// Cargar datos maestros para preparación extendida
+async function cargarDatosMaestrosPreparacion() {
+    try {
+        // Cargar en paralelo
+        const [colabRes, tareasRes, consRes] = await Promise.all([
+            // Colaboradores activos de RRHH
+            supabaseRRHH.from('colaboradores')
+                .select('id, nombre')
+                .eq('activo', true)
+                .order('nombre'),
+
+            // Tareas con etapa ENVIO de Producción
+            supabaseProduccion.from('tareas')
+                .select('id_tarea, nombre_tarea, etapa')
+                .eq('etapa', 'ENVIO')
+                .order('nombre_tarea'),
+
+            // Productos tipo EMPAQUE (consumibles) de Producción
+            supabaseProduccion.from('productos')
+                .select('id_producto, nombre_producto, sku')
+                .eq('tipo', 'EMPAQUE')
+                .eq('activo', true)
+                .order('nombre_producto')
+        ]);
+
+        colaboradoresCache = colabRes.data || [];
+        tareasEnvioCache = tareasRes.data || [];
+        consumiblesCache = consRes.data || [];
+
+        console.log(`Maestros cargados: ${colaboradoresCache.length} colaboradores, ${tareasEnvioCache.length} tareas, ${consumiblesCache.length} consumibles`);
+    } catch (err) {
+        console.error('Error cargando maestros:', err);
+    }
+}
+
+// Obtener preparación desde RRHH
+async function obtenerPreparacionRRHH(idEnvio) {
+    try {
+        const { data, error } = await supabaseRRHH.from('preparaciones')
+            .select('*')
+            .eq('tipo', 'ENVIO_MELI')
+            .eq('id_origen', idEnvio)
+            .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 = not found
+            console.error('Error obteniendo preparación:', error);
+        }
+        return data;
+    } catch (err) {
+        console.error('Error en obtenerPreparacionRRHH:', err);
+        return null;
+    }
+}
 
 // Helper para parsear fechas como local (evita problema UTC)
 function parsearFechaLocal(fechaStr) {
@@ -37,6 +148,11 @@ export const moduloEnviosCreados = {
     // RENDER: Dibuja la interfaz principal
     // ============================================
     render: async (contenedor) => {
+        // Resetear estado al entrar al módulo
+        vistaActual = 'recientes';
+        historicosCache = [];
+        filtroDestino = 'todos';
+
         contenedor.innerHTML = `
             <div class="max-w-7xl mx-auto space-y-6">
                 <!-- Header con filtros -->
@@ -51,14 +167,13 @@ export const moduloEnviosCreados = {
                         </div>
 
                         <div class="flex items-center gap-3">
-                            <!-- Filtro por estado -->
+                            <!-- Filtro por estado (solo en recientes) -->
                             <select id="filtro-estado"
                                     class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent">
                                 <option value="todos">Todos los estados</option>
                                 <option value="Borrador">Borrador</option>
                                 <option value="En Preparación">En Preparación</option>
                                 <option value="Despachado">Despachado</option>
-                                <option value="Recibido">Recibido</option>
                             </select>
 
                             <!-- Botón recargar -->
@@ -66,6 +181,48 @@ export const moduloEnviosCreados = {
                                     class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center gap-2">
                                 <i class="fas fa-sync-alt"></i>
                                 Recargar
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Pestañas Recientes / Históricos -->
+                    <div class="mt-4 border-t border-gray-100 pt-4">
+                        <div class="flex gap-2 mb-3">
+                            <button onclick="moduloEnviosCreados.cambiarVista('recientes')"
+                                    id="tab-recientes"
+                                    class="tab-vista px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-brand text-white">
+                                <i class="fas fa-clock mr-1"></i> Recientes
+                                <span id="count-recientes" class="ml-1 px-1.5 py-0.5 bg-white/20 rounded-full text-xs"></span>
+                            </button>
+                            <button onclick="moduloEnviosCreados.cambiarVista('historicos')"
+                                    id="tab-historicos"
+                                    class="tab-vista px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200">
+                                <i class="fas fa-archive mr-1"></i> Históricos
+                                <span id="count-historicos" class="ml-1 px-1.5 py-0.5 bg-gray-200 rounded-full text-xs"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Pestañas de filtro por destino -->
+                    <div id="tabs-destinos" class="border-t border-gray-100 pt-3 hidden">
+                        <div class="flex flex-wrap gap-2" id="contenedor-tabs-destinos">
+                            <button onclick="moduloEnviosCreados.filtrarPorDestino('todos')"
+                                    class="tab-destino px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-brand text-white"
+                                    data-destino="todos">
+                                <i class="fas fa-boxes mr-1"></i> Todos
+                                <span id="count-todos" class="ml-1 px-1.5 py-0.5 bg-white/20 rounded-full text-xs"></span>
+                            </button>
+                            <button onclick="moduloEnviosCreados.filtrarPorDestino('meli')"
+                                    class="tab-destino px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                    data-destino="meli">
+                                <i class="fas fa-store text-yellow-500 mr-1"></i> Full
+                                <span id="count-meli" class="ml-1 px-1.5 py-0.5 bg-gray-200 rounded-full text-xs"></span>
+                            </button>
+                            <button onclick="moduloEnviosCreados.filtrarPorDestino('externo')"
+                                    class="tab-destino px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                    data-destino="externo">
+                                <i class="fas fa-warehouse text-blue-500 mr-1"></i> 3PL
+                                <span id="count-externo" class="ml-1 px-1.5 py-0.5 bg-gray-200 rounded-full text-xs"></span>
                             </button>
                         </div>
                     </div>
@@ -208,6 +365,7 @@ export const moduloEnviosCreados = {
 
     // ============================================
     // CARGAR: Obtener envíos desde Supabase (OPTIMIZADO)
+    // Intenta usar tablas nuevas (registro_envios + destinos_envio), fallback a legacy
     // ============================================
     cargarEnvios: async () => {
         const listaDiv = document.getElementById('lista-envios');
@@ -219,21 +377,111 @@ export const moduloEnviosCreados = {
         `;
 
         try {
-            // Consultas en paralelo (3 queries en lugar de N+1)
-            const [enviosRes, detallesRes] = await Promise.all([
-                supabase
+            let envios = [];
+            let todosDetalles = [];
+
+            // Fecha límite: 30 días atrás
+            const fechaLimite = new Date();
+            fechaLimite.setDate(fechaLimite.getDate() - 30);
+            const fechaLimiteISO = fechaLimite.toISOString();
+
+            // Intentar cargar destinos primero
+            const { data: destinos, error: errorDestinos } = await supabase
+                .from('destinos_envio')
+                .select('*');
+
+            if (!errorDestinos && destinos && destinos.length > 0) {
+                // Tablas nuevas disponibles
+                destinosCache = {};
+                destinos.forEach(d => destinosCache[d.id_destino] = d);
+                usandoTablasNuevas = true;
+
+                // Mostrar pestañas de destino
+                document.getElementById('tabs-destinos')?.classList.remove('hidden');
+
+                // Cargar envíos RECIENTES: últimos 30 días O estado != 'Recibido'
+                const enviosRes = await supabase
+                    .from('registro_envios')
+                    .select('*')
+                    .or(`fecha_creacion.gte.${fechaLimiteISO},estado.neq.Recibido`)
+                    .order('fecha_creacion', { ascending: false });
+
+                if (enviosRes.error) throw enviosRes.error;
+                envios = enviosRes.data || [];
+
+                // También cargar conteo de históricos (Recibido + antiguos)
+                const historicosRes = await supabase
+                    .from('registro_envios')
+                    .select('id_envio, estado, fecha_creacion, id_destino, fecha_colecta')
+                    .eq('estado', 'Recibido')
+                    .lt('fecha_creacion', fechaLimiteISO)
+                    .order('fecha_creacion', { ascending: false });
+
+                historicosCache = (historicosRes.data || []).map(e => ({
+                    ...e,
+                    destino: destinosCache[e.id_destino] || { id_destino: 'FULL', nombre: 'MercadoLibre Full', tipo: 'meli' }
+                }));
+
+                // Luego cargar detalles SOLO de los envíos cargados (evita límite de 1000)
+                const envioIds = envios.map(e => e.id_envio);
+                if (envioIds.length > 0) {
+                    const detallesRes = await supabase
+                        .from('detalle_envios')
+                        .select('id_envio, sku, id_publicacion, cantidad_sugerida, cantidad_enviada, cantidad_recibida')
+                        .in('id_envio', envioIds);
+
+                    if (detallesRes.error) {
+                        console.error('Error cargando detalles:', detallesRes.error);
+                        throw detallesRes.error;
+                    }
+                    todosDetalles = detallesRes.data || [];
+                }
+
+                console.log(`Cargados: ${envios.length} envíos, ${todosDetalles.length} detalles`);
+
+                // Enriquecer cada envío con datos del destino
+                envios.forEach(envio => {
+                    const destino = destinosCache[envio.id_destino];
+                    envio.destino = destino || { id_destino: 'FULL', nombre: 'MercadoLibre Full', tipo: 'meli' };
+                });
+
+            } else {
+                // Fallback a tablas legacy
+                usandoTablasNuevas = false;
+                document.getElementById('tabs-destinos')?.classList.add('hidden');
+
+                // Cargar envíos primero
+                const enviosRes = await supabase
                     .from('registro_envios_full')
                     .select('*')
-                    .order('fecha_creacion', { ascending: false }),
-                supabase
-                    .from('detalle_envios_full')
-                    .select('id_envio, sku, id_publicacion, cantidad_enviada, cantidad_original')
-            ]);
+                    .order('fecha_creacion', { ascending: false });
 
-            if (enviosRes.error) throw enviosRes.error;
+                if (enviosRes.error) throw enviosRes.error;
+                envios = enviosRes.data || [];
 
-            const envios = enviosRes.data || [];
-            const todosDetalles = detallesRes.data || [];
+                // Luego cargar detalles SOLO de los envíos cargados
+                const envioIds = envios.map(e => e.id_envio);
+                if (envioIds.length > 0) {
+                    const detallesRes = await supabase
+                        .from('detalle_envios_full')
+                        .select('id_envio, sku, id_publicacion, cantidad_enviada, cantidad_original')
+                        .in('id_envio', envioIds);
+
+                    if (detallesRes.error) {
+                        console.error('Error cargando detalles legacy:', detallesRes.error);
+                        throw detallesRes.error;
+                    }
+                    todosDetalles = detallesRes.data || [];
+                }
+
+                console.log(`Cargados (legacy): ${envios.length} envíos, ${todosDetalles.length} detalles`);
+
+                // Para legacy, todos los envíos son a Full
+                envios.forEach(envio => {
+                    envio.destino = { id_destino: 'FULL', nombre: 'MercadoLibre Full', tipo: 'meli' };
+                    envio.id_destino = 'FULL';
+                });
+            }
 
             // Obtener todos los SKUs únicos para buscar títulos
             const todosSkus = [...new Set(todosDetalles.map(d => d.sku).filter(Boolean))];
@@ -269,10 +517,22 @@ export const moduloEnviosCreados = {
                 envio.totalBultos = envio.productos.reduce((sum, d) => sum + (d.cantidad_enviada || 0), 0);
             });
 
-            enviosCache = envios;
-            moduloEnviosCreados.pintarEnvios(envios);
+            // Filtrar envíos huérfanos (sin productos) - son residuos de migraciones fallidas
+            const enviosConProductos = envios.filter(e => e.productos.length > 0);
+            const enviosHuerfanos = envios.filter(e => e.productos.length === 0);
+            if (enviosHuerfanos.length > 0) {
+                console.warn(`⚠️ ${enviosHuerfanos.length} envíos sin productos (huérfanos):`, enviosHuerfanos.map(e => e.id_envio));
+            }
 
-            // Actualizar contador
+            enviosCache = enviosConProductos;
+
+            // Actualizar contadores de pestañas
+            moduloEnviosCreados.actualizarContadoresTabs();
+
+            // Aplicar filtro actual y pintar
+            moduloEnviosCreados.aplicarFiltros();
+
+            // Actualizar contador general
             document.getElementById('contador-envios').textContent = `(${envios.length} envíos)`;
 
         } catch (error) {
@@ -284,6 +544,277 @@ export const moduloEnviosCreados = {
                 </div>
             `;
         }
+    },
+
+    // ============================================
+    // ACTUALIZAR: Contadores de pestañas de destino y vista
+    // ============================================
+    actualizarContadoresTabs: () => {
+        // Contadores por destino (de envíos recientes)
+        const countTodos = enviosCache.length;
+        const countMeli = enviosCache.filter(e => e.destino?.tipo === 'meli').length;
+        const countExterno = enviosCache.filter(e => e.destino?.tipo === 'externo').length;
+
+        const elTodos = document.getElementById('count-todos');
+        const elMeli = document.getElementById('count-meli');
+        const elExterno = document.getElementById('count-externo');
+
+        if (elTodos) elTodos.textContent = countTodos;
+        if (elMeli) elMeli.textContent = countMeli;
+        if (elExterno) elExterno.textContent = countExterno;
+
+        // Contadores de vista (recientes / históricos)
+        const elRecientes = document.getElementById('count-recientes');
+        const elHistoricos = document.getElementById('count-historicos');
+
+        if (elRecientes) elRecientes.textContent = enviosCache.length;
+        if (elHistoricos) elHistoricos.textContent = historicosCache.length;
+    },
+
+    // ============================================
+    // FILTRAR: Por tipo de destino
+    // ============================================
+    filtrarPorDestino: (tipo) => {
+        filtroDestino = tipo;
+
+        // Actualizar estilos de pestañas
+        document.querySelectorAll('.tab-destino').forEach(btn => {
+            if (btn.dataset.destino === tipo) {
+                btn.classList.remove('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+                btn.classList.add('bg-brand', 'text-white');
+            } else {
+                btn.classList.remove('bg-brand', 'text-white');
+                btn.classList.add('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+            }
+        });
+
+        moduloEnviosCreados.aplicarFiltros();
+    },
+
+    // ============================================
+    // CAMBIAR VISTA: Recientes / Históricos
+    // ============================================
+    cambiarVista: (vista) => {
+        vistaActual = vista;
+
+        // Actualizar estilos de pestañas
+        const tabRecientes = document.getElementById('tab-recientes');
+        const tabHistoricos = document.getElementById('tab-historicos');
+
+        if (vista === 'recientes') {
+            tabRecientes?.classList.remove('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+            tabRecientes?.classList.add('bg-brand', 'text-white');
+            tabHistoricos?.classList.remove('bg-brand', 'text-white');
+            tabHistoricos?.classList.add('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+
+            // Mostrar filtros (estado y destino)
+            document.getElementById('filtro-estado')?.classList.remove('hidden');
+            document.getElementById('tabs-destinos')?.classList.remove('hidden');
+
+            // Pintar envíos recientes
+            moduloEnviosCreados.aplicarFiltros();
+        } else {
+            tabHistoricos?.classList.remove('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+            tabHistoricos?.classList.add('bg-brand', 'text-white');
+            tabRecientes?.classList.remove('bg-brand', 'text-white');
+            tabRecientes?.classList.add('bg-gray-100', 'text-gray-600', 'hover:bg-gray-200');
+
+            // Ocultar filtros en históricos
+            document.getElementById('filtro-estado')?.classList.add('hidden');
+            document.getElementById('tabs-destinos')?.classList.add('hidden');
+
+            // Pintar históricos (lista simplificada)
+            moduloEnviosCreados.pintarHistoricos();
+        }
+    },
+
+    // ============================================
+    // PINTAR HISTÓRICOS: Lista simplificada
+    // ============================================
+    pintarHistoricos: () => {
+        const listaDiv = document.getElementById('lista-envios');
+
+        if (!historicosCache || historicosCache.length === 0) {
+            listaDiv.innerHTML = `
+                <div class="col-span-full text-center py-12 text-gray-400">
+                    <i class="fas fa-archive fa-3x mb-4"></i>
+                    <p class="text-lg">No hay envíos históricos</p>
+                    <p class="text-sm mt-2">Los envíos recibidos con más de 30 días aparecerán aquí</p>
+                </div>
+            `;
+            return;
+        }
+
+        listaDiv.innerHTML = `
+            <div class="col-span-full">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">ID Envío</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Destino</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Fecha Creación</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Fecha Colecta</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Estado</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            ${historicosCache.map(envio => {
+                                const fechaCreacion = new Date(envio.fecha_creacion);
+                                const fechaColecta = parsearFechaLocal(envio.fecha_colecta);
+                                const destino = envio.destino || { nombre: 'Full', tipo: 'meli' };
+                                const esExterno = destino.tipo === 'externo';
+
+                                const badgeDestino = esExterno
+                                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                           <i class="fas fa-warehouse"></i> ${destino.nombre || '3PL'}
+                                       </span>`
+                                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                           <i class="fas fa-store"></i> Full
+                                       </span>`;
+
+                                return `
+                                    <tr class="hover:bg-gray-50 cursor-pointer" onclick="moduloEnviosCreados.verDetalleHistorico('${envio.id_envio}')">
+                                        <td class="px-4 py-3 font-medium text-gray-800">${envio.id_envio}</td>
+                                        <td class="px-4 py-3">${badgeDestino}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">${fechaCreacion.toLocaleDateString('es-AR')}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-600">${fechaColecta ? fechaColecta.toLocaleDateString('es-AR') : '-'}</td>
+                                        <td class="px-4 py-3">
+                                            <span class="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                ${envio.estado}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <button onclick="event.stopPropagation(); moduloEnviosCreados.verDetalleHistorico('${envio.id_envio}')"
+                                                    class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+                                                    title="Ver detalle">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    },
+
+    // ============================================
+    // VER DETALLE: Carga detalles de un envío histórico
+    // ============================================
+    verDetalleHistorico: async (idEnvio) => {
+        mostrarNotificacion('Cargando detalle...', 'info');
+
+        try {
+            // Cargar detalles del envío
+            const { data: detalles, error } = await supabase
+                .from('detalle_envios')
+                .select('sku, id_publicacion, cantidad_sugerida, cantidad_enviada, cantidad_recibida')
+                .eq('id_envio', idEnvio);
+
+            if (error) throw error;
+
+            // Obtener títulos de las publicaciones
+            const skus = detalles.map(d => d.sku).filter(Boolean);
+            let titulosMap = {};
+            if (skus.length > 0) {
+                const { data: pubs } = await supabase
+                    .from('publicaciones_meli')
+                    .select('sku, titulo')
+                    .in('sku', skus);
+
+                if (pubs) {
+                    pubs.forEach(p => titulosMap[p.sku] = p.titulo);
+                }
+            }
+
+            // Enriquecer detalles con títulos
+            const detallesConTitulo = detalles.map(d => ({
+                ...d,
+                titulo: titulosMap[d.sku] || d.sku
+            }));
+
+            // Obtener datos del envío
+            const envioHistorico = historicosCache.find(e => e.id_envio === idEnvio);
+            const destino = envioHistorico?.destino || { nombre: 'Full', tipo: 'meli' };
+
+            // Mostrar modal con detalle
+            const modal = document.getElementById('modal-editar-envio');
+            const modalTitulo = document.getElementById('modal-titulo');
+            const modalContenido = document.getElementById('modal-contenido');
+            const btnGuardar = document.getElementById('btn-guardar-modal');
+
+            modalTitulo.innerHTML = `<i class="fas fa-archive mr-2"></i> Detalle Histórico: ${idEnvio}`;
+            btnGuardar.classList.add('hidden'); // Ocultar botón guardar
+
+            const totalUnidades = detallesConTitulo.reduce((sum, d) => sum + (d.cantidad_enviada || 0), 0);
+
+            modalContenido.innerHTML = `
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2 text-sm text-gray-600">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${destino.tipo === 'externo' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}">
+                            <i class="fas ${destino.tipo === 'externo' ? 'fa-warehouse' : 'fa-store'}"></i>
+                            ${destino.nombre || 'Full'}
+                        </span>
+                        <span>•</span>
+                        <span>${detallesConTitulo.length} productos</span>
+                        <span>•</span>
+                        <span>${totalUnidades} unidades</span>
+                    </div>
+
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">SKU</th>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Producto</th>
+                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Enviado</th>
+                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Recibido</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            ${detallesConTitulo.map(d => `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-3 py-2 font-medium text-gray-800">${d.sku}</td>
+                                    <td class="px-3 py-2 text-gray-600 truncate max-w-[200px]" title="${d.titulo}">${d.titulo}</td>
+                                    <td class="px-3 py-2 text-right">${d.cantidad_enviada || 0}</td>
+                                    <td class="px-3 py-2 text-right ${d.cantidad_recibida !== d.cantidad_enviada ? 'text-orange-600 font-medium' : ''}">${d.cantidad_recibida || 0}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            modal.classList.remove('hidden');
+
+        } catch (error) {
+            console.error('Error cargando detalle histórico:', error);
+            mostrarNotificacion(`Error: ${error.message}`, 'error');
+        }
+    },
+
+    // ============================================
+    // APLICAR: Ambos filtros (estado + destino)
+    // ============================================
+    aplicarFiltros: () => {
+        const filtroEstado = document.getElementById('filtro-estado')?.value || 'todos';
+
+        let enviosFiltrados = enviosCache;
+
+        // Filtrar por estado
+        if (filtroEstado !== 'todos') {
+            enviosFiltrados = enviosFiltrados.filter(e => e.estado === filtroEstado);
+        }
+
+        // Filtrar por destino
+        if (filtroDestino !== 'todos') {
+            enviosFiltrados = enviosFiltrados.filter(e => e.destino?.tipo === filtroDestino);
+        }
+
+        moduloEnviosCreados.pintarEnvios(enviosFiltrados);
     },
 
     // ============================================
@@ -306,6 +837,8 @@ export const moduloEnviosCreados = {
         listaDiv.innerHTML = envios.map(envio => {
             const fechaCreacion = new Date(envio.fecha_creacion);
             const fechaColecta = parsearFechaLocal(envio.fecha_colecta);
+            const destino = envio.destino || { nombre: 'Full', tipo: 'meli' };
+            const esExterno = destino.tipo === 'externo';
 
             // Colores según estado
             const estadoColores = {
@@ -317,28 +850,40 @@ export const moduloEnviosCreados = {
 
             const estadoClase = estadoColores[envio.estado] || estadoColores['Borrador'];
 
-            // Borde izquierdo según estado
-            const bordeIzq = {
-                'Borrador': 'border-l-gray-400',
-                'En Preparación': 'border-l-yellow-500',
-                'Despachado': 'border-l-blue-500',
-                'Recibido': 'border-l-green-500'
-            };
+            // Borde izquierdo según tipo de destino
+            const bordeIzq = esExterno ? 'border-l-blue-500' : 'border-l-yellow-500';
 
-            const bordeClase = bordeIzq[envio.estado] || bordeIzq['Borrador'];
+            // Badge de destino
+            const badgeDestino = esExterno
+                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                       <i class="fas fa-warehouse"></i> ${destino.nombre || '3PL'}
+                   </span>`
+                : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                       <i class="fas fa-store"></i> Full
+                   </span>`;
 
             return `
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 border-l-4 ${bordeClase} overflow-hidden hover:shadow-md transition-shadow" data-estado="${envio.estado}">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 border-l-4 ${bordeIzq} overflow-hidden hover:shadow-md transition-shadow" data-estado="${envio.estado}" data-destino-tipo="${destino.tipo}">
                 <!-- Header de la tarjeta -->
                 <div class="p-4 border-b border-gray-100">
                     <div class="flex justify-between items-start">
                         <div>
                             <h4 class="font-bold text-gray-800 text-lg">${envio.id_envio}</h4>
-                            ${envio.id_envio_ml ? `<p class="text-xs text-gray-500">ML: ${envio.id_envio_ml}</p>` : ''}
+                            <div class="flex items-center gap-2 mt-1">
+                                ${badgeDestino}
+                                ${envio.id_envio_ml ? `<span class="text-xs text-gray-500">ML: ${envio.id_envio_ml}</span>` : ''}
+                            </div>
                         </div>
-                        <span class="px-3 py-1 rounded-full text-xs font-bold ${estadoClase}">
-                            ${envio.estado}
-                        </span>
+                        <div class="flex items-center gap-2">
+                            <span class="px-3 py-1 rounded-full text-xs font-bold ${estadoClase}">
+                                ${envio.estado}
+                            </span>
+                            ${envio.embalado ? `
+                            <span class="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
+                                <i class="fas fa-check-circle mr-1"></i>Embalado
+                            </span>
+                            ` : ''}
+                        </div>
                     </div>
                 </div>
 
@@ -406,7 +951,7 @@ export const moduloEnviosCreados = {
                     </select>
 
                     <!-- Botones de acción -->
-                    <div class="flex gap-1">
+                    <div class="flex gap-1 flex-wrap">
                         <button onclick="moduloEnviosCreados.iniciarPreparacion('${envio.id_envio}')"
                                 class="p-2 ${envio.estado === 'En Preparación' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'} rounded-lg transition-colors"
                                 title="Preparar envío"
@@ -426,6 +971,20 @@ export const moduloEnviosCreados = {
                             <i class="fas fa-file-pdf"></i>
                         </button>
 
+                        ${esExterno ? `
+                        <button onclick="moduloEnviosCreados.generarRemito('${envio.id_envio}')"
+                                class="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                                title="Generar Remito 3PL">
+                            <i class="fas fa-file-invoice"></i>
+                        </button>
+
+                        <button onclick="moduloEnviosCreados.generarEtiquetas('${envio.id_envio}')"
+                                class="p-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors"
+                                title="Generar Etiquetas">
+                            <i class="fas fa-tags"></i>
+                        </button>
+                        ` : ''}
+
                         <button onclick="moduloEnviosCreados.eliminarEnvio('${envio.id_envio}')"
                                 class="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
                                 title="Eliminar envío">
@@ -439,15 +998,10 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // FILTRAR: Por estado
+    // FILTRAR: Por estado (legacy, redirige a aplicarFiltros)
     // ============================================
     filtrarEnvios: () => {
-        const filtro = document.getElementById('filtro-estado').value;
-        const enviosFiltrados = filtro === 'todos'
-            ? enviosCache
-            : enviosCache.filter(e => e.estado === filtro);
-
-        moduloEnviosCreados.pintarEnvios(enviosFiltrados);
+        moduloEnviosCreados.aplicarFiltros();
     },
 
     // ============================================
@@ -455,8 +1009,9 @@ export const moduloEnviosCreados = {
     // ============================================
     cambiarEstado: async (idEnvio, nuevoEstado) => {
         try {
+            const tabla = usandoTablasNuevas ? 'registro_envios' : 'registro_envios_full';
             const { error } = await supabase
-                .from('registro_envios_full')
+                .from(tabla)
                 .update({ estado: nuevoEstado })
                 .eq('id_envio', idEnvio);
 
@@ -466,10 +1021,15 @@ export const moduloEnviosCreados = {
             const envio = enviosCache.find(e => e.id_envio === idEnvio);
             if (envio) envio.estado = nuevoEstado;
 
+            // Sincronizar con RRHH si cambia a "En Preparación"
+            if (nuevoEstado === 'En Preparación' && envio) {
+                await sincronizarConRRHH(envio, 'crear');
+            }
+
             mostrarNotificacion(`Estado actualizado a "${nuevoEstado}"`, 'success');
 
             // Recargar para actualizar colores
-            moduloEnviosCreados.pintarEnvios(enviosCache);
+            moduloEnviosCreados.aplicarFiltros();
 
         } catch (error) {
             console.error('Error cambiando estado:', error);
@@ -575,6 +1135,7 @@ export const moduloEnviosCreados = {
     // ============================================
     cerrarModal: () => {
         document.getElementById('modal-editar-envio').classList.add('hidden');
+        document.getElementById('btn-guardar-modal')?.classList.remove('hidden'); // Restaurar botón guardar
         envioSeleccionado = null;
     },
 
@@ -593,10 +1154,13 @@ export const moduloEnviosCreados = {
             const idMl = document.getElementById('edit-id-ml').value.trim();
             const notas = document.getElementById('edit-notas').value.trim();
 
+            const tablaEnvios = usandoTablasNuevas ? 'registro_envios' : 'registro_envios_full';
+            const tablaDetalles = usandoTablasNuevas ? 'detalle_envios' : 'detalle_envios_full';
+
             // Actualizar registro del envío
             // Guardar fecha con hora al mediodía para evitar problemas de timezone UTC
             const { error } = await supabase
-                .from('registro_envios_full')
+                .from(tablaEnvios)
                 .update({
                     fecha_colecta: fechaColecta ? `${fechaColecta}T12:00:00` : null,
                     id_envio_ml: idMl || null,
@@ -609,22 +1173,26 @@ export const moduloEnviosCreados = {
             // Actualizar detalles de productos
             // Primero eliminar los existentes
             await supabase
-                .from('detalle_envios_full')
+                .from(tablaDetalles)
                 .delete()
                 .eq('id_envio', envioSeleccionado.id_envio);
 
             // Insertar los nuevos
             if (envioSeleccionado.productos.length > 0) {
-                const detalles = envioSeleccionado.productos.map(p => ({
+                const detallesBase = envioSeleccionado.productos.map(p => ({
                     id_envio: envioSeleccionado.id_envio,
                     sku: p.sku,
                     id_publicacion: p.id_publicacion || null,
-                    cantidad_enviada: p.cantidad_enviada,
-                    cantidad_original: p.cantidad_original || p.cantidad_enviada // Guardar cantidad original
+                    cantidad_enviada: p.cantidad_enviada
                 }));
 
+                // Agregar campos específicos según tabla
+                const detalles = usandoTablasNuevas
+                    ? detallesBase.map(d => ({ ...d, cantidad_sugerida: d.cantidad_enviada }))
+                    : detallesBase.map(d => ({ ...d, cantidad_original: d.cantidad_enviada }));
+
                 const { error: errorDet } = await supabase
-                    .from('detalle_envios_full')
+                    .from(tablaDetalles)
                     .insert(detalles);
 
                 if (errorDet) throw errorDet;
@@ -896,6 +1464,9 @@ export const moduloEnviosCreados = {
         if (!confirmado) return;
 
         try {
+            const tablaEnvios = usandoTablasNuevas ? 'registro_envios' : 'registro_envios_full';
+            const tablaDetalles = usandoTablasNuevas ? 'detalle_envios' : 'detalle_envios_full';
+
             // Eliminar progreso de preparación si existe
             await supabase
                 .from('preparacion_en_curso')
@@ -904,13 +1475,13 @@ export const moduloEnviosCreados = {
 
             // Eliminar detalles (FK)
             await supabase
-                .from('detalle_envios_full')
+                .from(tablaDetalles)
                 .delete()
                 .eq('id_envio', idEnvio);
 
             // Eliminar registro del envío
             const { error } = await supabase
-                .from('registro_envios_full')
+                .from(tablaEnvios)
                 .delete()
                 .eq('id_envio', idEnvio);
 
@@ -1141,6 +1712,25 @@ export const moduloEnviosCreados = {
 
         moduloEnviosCreados.preparacionActiva = envio;
 
+        // Cargar datos maestros para preparación extendida (colaboradores, tareas, consumibles)
+        await cargarDatosMaestrosPreparacion();
+
+        // Obtener preparación desde RRHH (para preseleccionar colaborador asignado)
+        preparacionRRHH = await obtenerPreparacionRRHH(idEnvio);
+
+        // Inicializar estado de tareas y consumibles
+        tareasSeleccionadas = [];
+        consumiblesUsados = {};
+        cantidadBultosPrep = envio.totalBultos || 0;
+
+        // Si hay preparación en RRHH y está asignada, marcar inicio
+        if (preparacionRRHH && preparacionRRHH.estado === 'ASIGNADO') {
+            await supabaseRRHH.rpc('rpc_iniciar_preparacion', {
+                p_preparacion_id: preparacionRRHH.id,
+                p_colaborador_id: preparacionRRHH.asignado_a_id
+            });
+        }
+
         // Verificar si hay progreso guardado
         const progresoGuardado = await moduloEnviosCreados.cargarProgresoGuardado(envio.id_envio);
         const progresoMap = {};
@@ -1219,6 +1809,90 @@ export const moduloEnviosCreados = {
                             </button>
                         </div>
                     </div>
+                </div>
+
+                <!-- Sección RRHH: Preparador, Tareas, Consumibles, Bultos -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="font-bold text-gray-700">
+                            <i class="fas fa-users text-brand mr-2"></i>
+                            Datos de Preparación
+                        </h4>
+                        <span id="tiempo-preparacion" class="text-sm text-gray-500">
+                            <i class="fas fa-clock mr-1"></i> 00:00:00
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Preparador principal -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-600 mb-1">Preparador</label>
+                            <select id="select-preparador" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <option value="">-- Seleccionar --</option>
+                                ${colaboradoresCache.map(c => `
+                                    <option value="${c.id}" ${preparacionRRHH?.asignado_a_id === c.id ? 'selected' : ''}>
+                                        ${c.nombre}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+
+                        <!-- Cantidad de bultos -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-600 mb-1">Cantidad de Bultos</label>
+                            <input type="number" id="input-bultos" min="1" value="${cantidadBultosPrep}"
+                                   onchange="cantidadBultosPrep = parseInt(this.value) || 1"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        </div>
+                    </div>
+
+                    <!-- Tareas -->
+                    ${tareasEnvioCache.length > 0 ? `
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-gray-600 mb-2">Tareas Realizadas</label>
+                        <div class="space-y-2" id="lista-tareas-prep">
+                            ${tareasEnvioCache.map(t => `
+                                <div class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 border border-gray-100">
+                                    <input type="checkbox" id="tarea-${t.id_tarea}"
+                                           onchange="moduloEnviosCreados.toggleTarea('${t.id_tarea}', '${t.nombre_tarea}')"
+                                           class="w-4 h-4 text-brand rounded">
+                                    <label for="tarea-${t.id_tarea}" class="flex-1 text-sm text-gray-700">
+                                        ${t.nombre_tarea}
+                                    </label>
+                                    <div id="colab-${t.id_tarea}" class="hidden flex items-center gap-2">
+                                        <select id="select-colab-${t.id_tarea}" class="border border-gray-300 rounded px-2 py-1 text-xs">
+                                            ${colaboradoresCache.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+                                        </select>
+                                        <button onclick="moduloEnviosCreados.agregarColabTarea('${t.id_tarea}')"
+                                                class="text-brand hover:text-brand-dark text-xs">
+                                            <i class="fas fa-plus"></i>
+                                        </button>
+                                    </div>
+                                    <div id="chips-${t.id_tarea}" class="flex flex-wrap gap-1"></div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+
+                    <!-- Consumibles -->
+                    ${consumiblesCache.length > 0 ? `
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-gray-600 mb-2">Consumibles Utilizados</label>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-2" id="lista-consumibles-prep">
+                            ${consumiblesCache.map(c => `
+                                <div class="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
+                                    <input type="number" id="cons-${c.id_producto}" min="0" step="0.5" value="0"
+                                           onchange="consumiblesUsados['${c.id_producto}'] = parseFloat(this.value) || 0"
+                                           class="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-center">
+                                    <span class="text-xs text-gray-600 truncate" title="${c.nombre_producto}">
+                                        ${c.nombre_producto.length > 15 ? c.nombre_producto.substring(0,15) + '...' : c.nombre_producto}
+                                    </span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
 
                 <!-- Área de foco/escaneo -->
@@ -1742,6 +2416,84 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
+    // TAREAS: Manejo de tareas en preparación
+    // ============================================
+    toggleTarea: (tareaId, tareaNombre) => {
+        const checkbox = document.getElementById(`tarea-${tareaId}`);
+        const colabDiv = document.getElementById(`colab-${tareaId}`);
+
+        if (checkbox.checked) {
+            // Mostrar selector de colaborador
+            colabDiv.classList.remove('hidden');
+
+            // Agregar tarea con el preparador principal por defecto
+            const preparadorId = document.getElementById('select-preparador').value;
+            const preparadorOption = document.getElementById('select-preparador').selectedOptions[0];
+            const preparadorNombre = preparadorOption?.text || '';
+
+            const tareaExistente = tareasSeleccionadas.find(t => t.tarea_id === tareaId);
+            if (!tareaExistente) {
+                tareasSeleccionadas.push({
+                    tarea_id: tareaId,
+                    tarea_nombre: tareaNombre,
+                    colaboradores: preparadorId ? [{ id: preparadorId, nombre: preparadorNombre }] : []
+                });
+                moduloEnviosCreados.renderChipsTarea(tareaId);
+            }
+        } else {
+            // Ocultar y limpiar
+            colabDiv.classList.add('hidden');
+            tareasSeleccionadas = tareasSeleccionadas.filter(t => t.tarea_id !== tareaId);
+            document.getElementById(`chips-${tareaId}`).innerHTML = '';
+        }
+    },
+
+    agregarColabTarea: (tareaId) => {
+        const select = document.getElementById(`select-colab-${tareaId}`);
+        const colabId = select.value;
+        const colabNombre = select.selectedOptions[0]?.text || '';
+
+        if (!colabId) return;
+
+        const tarea = tareasSeleccionadas.find(t => t.tarea_id === tareaId);
+        if (!tarea) return;
+
+        // Evitar duplicados
+        if (tarea.colaboradores.some(c => c.id === colabId)) {
+            mostrarNotificacion('Colaborador ya agregado', 'warning');
+            return;
+        }
+
+        tarea.colaboradores.push({ id: colabId, nombre: colabNombre });
+        moduloEnviosCreados.renderChipsTarea(tareaId);
+    },
+
+    renderChipsTarea: (tareaId) => {
+        const tarea = tareasSeleccionadas.find(t => t.tarea_id === tareaId);
+        const container = document.getElementById(`chips-${tareaId}`);
+
+        if (!tarea || !container) return;
+
+        container.innerHTML = tarea.colaboradores.map(c => `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand/10 text-brand rounded-full text-xs">
+                ${c.nombre}
+                <button onclick="moduloEnviosCreados.quitarColabTarea('${tareaId}', '${c.id}')"
+                        class="hover:text-red-500">
+                    <i class="fas fa-times"></i>
+                </button>
+            </span>
+        `).join('');
+    },
+
+    quitarColabTarea: (tareaId, colabId) => {
+        const tarea = tareasSeleccionadas.find(t => t.tarea_id === tareaId);
+        if (!tarea) return;
+
+        tarea.colaboradores = tarea.colaboradores.filter(c => c.id !== colabId);
+        moduloEnviosCreados.renderChipsTarea(tareaId);
+    },
+
+    // ============================================
     // VOLVER: Salir de preparación (siempre funciona, ya se auto-guardó)
     // ============================================
     volverDePreparacion: async () => {
@@ -1929,53 +2681,123 @@ export const moduloEnviosCreados = {
         const envio = moduloEnviosCreados.preparacionActiva;
         if (!envio) return;
 
+        const tablaEnvios = usandoTablasNuevas ? 'registro_envios' : 'registro_envios_full';
+        const tablaDetalles = usandoTablasNuevas ? 'detalle_envios' : 'detalle_envios_full';
+        const campoOriginal = usandoTablasNuevas ? 'cantidad_sugerida' : 'cantidad_original';
+
         try {
-            // Si hay que actualizar cantidades en detalle_envios_full
+            // Si hay que actualizar cantidades en tabla de detalles
             if (actualizarCantidades) {
                 // Primero obtener las cantidades originales de la BD
                 const { data: detallesOriginales } = await supabase
-                    .from('detalle_envios_full')
-                    .select('sku, cantidad_enviada, cantidad_original')
+                    .from(tablaDetalles)
+                    .select(`sku, cantidad_enviada, ${campoOriginal}`)
                     .eq('id_envio', envio.id_envio);
 
                 // Crear mapa de cantidades originales
                 const cantidadesOriginales = {};
                 if (detallesOriginales) {
                     detallesOriginales.forEach(d => {
-                        // Usar cantidad_original si existe, sino cantidad_enviada original
-                        cantidadesOriginales[d.sku] = d.cantidad_original || d.cantidad_enviada;
+                        // Usar cantidad_original/sugerida si existe, sino cantidad_enviada original
+                        cantidadesOriginales[d.sku] = d[campoOriginal] || d.cantidad_enviada;
                     });
                 }
 
                 // Eliminar detalles anteriores
                 await supabase
-                    .from('detalle_envios_full')
+                    .from(tablaDetalles)
                     .delete()
                     .eq('id_envio', envio.id_envio);
 
-                // Insertar con cantidades actualizadas, preservando cantidad_original
-                const detallesActualizados = moduloEnviosCreados.productosPreparacion.map(p => ({
-                    id_envio: envio.id_envio,
-                    sku: p.sku,
-                    id_publicacion: p.id_publicacion || null,
-                    cantidad_enviada: p.cantidad_enviada,
-                    cantidad_original: cantidadesOriginales[p.sku] || p.cantidad_enviada
-                }));
+                // Insertar con cantidades actualizadas, preservando cantidad original
+                const detallesActualizados = moduloEnviosCreados.productosPreparacion.map(p => {
+                    const base = {
+                        id_envio: envio.id_envio,
+                        sku: p.sku,
+                        id_publicacion: p.id_publicacion || null,
+                        cantidad_enviada: p.cantidad_enviada
+                    };
+                    base[campoOriginal] = cantidadesOriginales[p.sku] || p.cantidad_enviada;
+                    return base;
+                });
 
                 const { error: errorDetalles } = await supabase
-                    .from('detalle_envios_full')
+                    .from(tablaDetalles)
                     .insert(detallesActualizados);
 
                 if (errorDetalles) throw errorDetalles;
             }
 
-            // Cambiar estado a "Despachado"
+            // Cambiar estado a "Despachado" y marcar como embalado
             const { error } = await supabase
-                .from('registro_envios_full')
-                .update({ estado: 'Despachado' })
+                .from(tablaEnvios)
+                .update({
+                    estado: 'Despachado',
+                    embalado: true
+                })
                 .eq('id_envio', envio.id_envio);
 
             if (error) throw error;
+
+            // Finalizar preparación en RRHH
+            if (preparacionRRHH?.id) {
+                // Obtener cantidad de bultos del input
+                const bultosInput = document.getElementById('input-bultos');
+                const cantBultos = parseInt(bultosInput?.value) || cantidadBultosPrep;
+
+                // Preparar consumibles usados (filtrar los que tienen cantidad > 0)
+                const consumiblesArray = Object.entries(consumiblesUsados)
+                    .filter(([, cantidad]) => cantidad > 0)
+                    .map(([id, cantidad]) => {
+                        const producto = consumiblesCache.find(c => c.id_producto === id);
+                        return {
+                            producto_id: id,
+                            nombre: producto?.nombre_producto || id,
+                            cantidad: cantidad
+                        };
+                    });
+
+                // Llamar RPC para finalizar
+                const { data: resRRHH, error: errRRHH } = await supabaseRRHH.rpc('rpc_finalizar_preparacion', {
+                    p_preparacion_id: preparacionRRHH.id,
+                    p_tareas_realizadas: tareasSeleccionadas,
+                    p_consumibles: consumiblesArray,
+                    p_cantidad_bultos: cantBultos
+                });
+
+                if (errRRHH) {
+                    console.error('Error finalizando en RRHH:', errRRHH);
+                } else {
+                    console.log('Preparación finalizada en RRHH:', resRRHH);
+
+                    // Registrar en bitacora_trabajos para cada colaborador/tarea
+                    const preparadorId = document.getElementById('select-preparador')?.value;
+                    if (tareasSeleccionadas.length > 0) {
+                        for (const tarea of tareasSeleccionadas) {
+                            for (const colab of tarea.colaboradores) {
+                                await supabaseRRHH.from('bitacora_trabajos').insert({
+                                    colaborador_id: colab.id,
+                                    fecha: new Date().toISOString().split('T')[0],
+                                    tipo_trabajo: 'ENVIO',
+                                    descripcion: `${tarea.tarea_nombre} - ${envio.id_envio}`,
+                                    referencia_externa: envio.id_envio,
+                                    cantidad: 1
+                                });
+                            }
+                        }
+                    } else if (preparadorId) {
+                        // Si no hay tareas marcadas, registrar al preparador principal
+                        await supabaseRRHH.from('bitacora_trabajos').insert({
+                            colaborador_id: preparadorId,
+                            fecha: new Date().toISOString().split('T')[0],
+                            tipo_trabajo: 'ENVIO',
+                            descripcion: `Preparación envío ${envio.id_envio}`,
+                            referencia_externa: envio.id_envio,
+                            cantidad: 1
+                        });
+                    }
+                }
+            }
 
             // Limpiar progreso guardado ya que se completó
             await supabase
@@ -1989,7 +2811,13 @@ export const moduloEnviosCreados = {
                 moduloEnviosCreados.realtimeChannel = null;
             }
 
-            mostrarNotificacion('Preparación finalizada. Envío marcado como Despachado.', 'success');
+            // Limpiar estado de preparación RRHH
+            preparacionRRHH = null;
+            tareasSeleccionadas = [];
+            consumiblesUsados = {};
+            cantidadBultosPrep = 0;
+
+            mostrarNotificacion('Preparación finalizada. Envío marcado como Despachado y Embalado.', 'success');
 
             moduloEnviosCreados.preparacionActiva = null;
             moduloEnviosCreados.productosPreparacion = [];
@@ -2002,6 +2830,70 @@ export const moduloEnviosCreados = {
         } catch (error) {
             console.error('Error finalizando preparación:', error);
             mostrarNotificacion('Error al finalizar preparación', 'error');
+        }
+    },
+
+    // ============================================
+    // REMITO 3PL: Abrir modal para generar remito
+    // ============================================
+    generarRemito: async (idEnvio) => {
+        const envio = enviosCache.find(e => e.id_envio === idEnvio);
+        if (!envio) {
+            mostrarNotificacion('Envío no encontrado', 'error');
+            return;
+        }
+
+        const destino = envio.destino;
+        if (!destino || destino.tipo !== 'externo') {
+            mostrarNotificacion('El remito solo está disponible para envíos a depósitos externos', 'warning');
+            return;
+        }
+
+        // Verificar si ya tiene remito
+        if (envio.link_remito) {
+            mostrarNotificacion('Este envío ya tiene un remito generado', 'info');
+            return;
+        }
+
+        try {
+            // Importar módulo de remitos dinámicamente
+            const { moduloRemitosEnvio } = await import('./remitosEnvio.js');
+            await moduloRemitosEnvio.abrirModalRemito(idEnvio);
+        } catch (importError) {
+            console.error('Error cargando módulo de remitos:', importError);
+            mostrarNotificacion('Error al cargar módulo de remitos', 'error');
+        }
+    },
+
+    // ============================================
+    // ETIQUETAS 3PL: Generar etiquetas para bultos
+    // ============================================
+    generarEtiquetas: async (idEnvio) => {
+        const envio = enviosCache.find(e => e.id_envio === idEnvio);
+        if (!envio) {
+            mostrarNotificacion('Envío no encontrado', 'error');
+            return;
+        }
+
+        const destino = envio.destino;
+        if (!destino || destino.tipo !== 'externo') {
+            mostrarNotificacion('Las etiquetas solo están disponibles para envíos a depósitos externos', 'warning');
+            return;
+        }
+
+        try {
+            // Importar módulo de remitos dinámicamente si existe
+            try {
+                const { moduloRemitos } = await import('./remitosEnvio.js');
+                await moduloRemitos.generarEtiquetas(envio, destino);
+            } catch (importError) {
+                // Si el módulo no existe aún, mostrar mensaje
+                console.warn('Módulo de etiquetas no disponible:', importError);
+                mostrarNotificacion('Funcionalidad de etiquetas en desarrollo. Próximamente disponible.', 'info');
+            }
+        } catch (error) {
+            console.error('Error generando etiquetas:', error);
+            mostrarNotificacion('Error al generar etiquetas', 'error');
         }
     }
 };

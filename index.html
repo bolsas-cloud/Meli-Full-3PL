@@ -62,87 +62,94 @@
     <!-- Sidebar -->
     <aside class="w-52 lg:w-64 bg-brand text-white flex-shrink-0 flex flex-col shadow-xl z-20 transition-all duration-300" id="sidebar">
 
-        <div class="p-3 lg:p-6 border-b border-white/20">
+        <div class="p-2 lg:p-4 border-b border-white/20">
             <h1 class="text-base lg:text-xl font-bold tracking-tight flex items-center gap-2">
                 <i class="fas fa-boxes-stacked"></i>
                 <span>Meli Full 3PL</span>
             </h1>
         </div>
 
-        <nav class="flex-1 overflow-y-auto py-2 lg:py-4">
-            <ul class="space-y-0.5 lg:space-y-1 px-2 lg:px-3">
+        <nav class="flex-1 py-1 lg:py-2">
+            <ul class="space-y-0 px-2 lg:px-3">
 
                 <li>
-                    <a href="#" onclick="router.navegar('dashboard')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-chart-line w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('dashboard')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-chart-line w-5 text-center mr-2"></i>
                         Dashboard
                     </a>
                 </li>
 
-                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
+                <li class="px-3 lg:px-4 pt-2 lg:pt-3 pb-0.5 lg:pb-1 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
                     Logística
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('calculadora')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-calculator w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('calculadora')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-calculator w-5 text-center mr-2"></i>
                         Calculadora Envíos
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('envios')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-truck-loading w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('envios')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-truck-loading w-5 text-center mr-2"></i>
                         Envíos Creados
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('etiquetas')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-barcode w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('etiquetas')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-barcode w-5 text-center mr-2"></i>
                         Etiquetas
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('stock')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-warehouse w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('stock')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-warehouse w-5 text-center mr-2"></i>
                         Seguimiento Stock
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('reconciliacion')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-balance-scale w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('reconciliacion')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-balance-scale w-5 text-center mr-2"></i>
                         Reconciliación 3PL
                     </a>
                 </li>
 
-                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
+                <li class="px-3 lg:px-4 pt-2 lg:pt-3 pb-0.5 lg:pb-1 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
                     Gestión
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('precios')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-tags w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('precios')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-tags w-5 text-center mr-2"></i>
                         Precios
                     </a>
                 </li>
 
                 <li>
-                    <a href="#" onclick="router.navegar('publicaciones')" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-store w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('publicaciones')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-store w-5 text-center mr-2"></i>
                         Publicaciones
                     </a>
                 </li>
 
-                <li class="px-3 lg:px-4 pt-2 lg:pt-4 pb-1 lg:pb-2 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
-                    Herramientas
+                <li class="px-3 lg:px-4 pt-2 lg:pt-3 pb-0.5 lg:pb-1 text-[10px] lg:text-xs font-bold text-white/60 uppercase tracking-wider">
+                    Configuración
                 </li>
 
                 <li>
-                    <a href="migracion.html" target="_blank" class="nav-item flex items-center px-3 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
-                        <i class="fas fa-database w-6 text-center mr-3"></i>
+                    <a href="#" onclick="router.navegar('depositos')" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-warehouse w-5 text-center mr-2"></i>
+                        Depósitos
+                    </a>
+                </li>
+
+                <li>
+                    <a href="migracion.html" target="_blank" class="nav-item flex items-center px-3 lg:px-4 py-1.5 lg:py-2 text-xs lg:text-sm font-medium rounded-lg hover:bg-white/10 transition-colors text-white/90 hover:text-white">
+                        <i class="fas fa-database w-5 text-center mr-2"></i>
                         Migrar Datos
                         <i class="fas fa-external-link-alt text-xs ml-auto opacity-50"></i>
                     </a>
@@ -152,7 +159,7 @@
         </nav>
 
         <!-- Versión y Recarga -->
-        <div class="p-2 lg:p-4 border-t border-white/20">
+        <div class="p-2 border-t border-white/20">
             <div class="flex items-center justify-between text-[10px] lg:text-xs">
                 <span class="text-white/50">v1.6.0</span>
                 <button
