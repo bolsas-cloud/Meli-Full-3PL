@@ -140,7 +140,7 @@ export const moduloStock = {
                                 <col style="width:90px">
                                 <col style="width:80px">
                                 <col style="width:60px">
-                                <col style="width:90px">
+                                <col style="width:110px">
                             </colgroup>
                             <thead class="bg-gray-50 border-b border-gray-200">
                                 <tr>
@@ -150,7 +150,7 @@ export const moduloStock = {
                                     <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
                                     <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
                                     <th class="px-1 py-3 text-center text-xs font-bold text-gray-500 uppercase">Flex</th>
-                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
+                                    <th class="px-2 pr-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-stock" class="divide-y divide-gray-100">
@@ -360,7 +360,7 @@ export const moduloStock = {
                             <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-brand rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 ${flexDisabled ? 'opacity-50 cursor-not-allowed' : ''}"></div>
                         </label>
                     </td>
-                    <td class="px-2 py-2 text-center">
+                    <td class="px-2 pr-4 py-2 text-center">
                         <select class="estado-select border border-gray-300 rounded px-1 py-1 text-xs ${estadoColor}"
                                 data-item-id="${p.id_publicacion}"
                                 data-original="${p.estado}">
