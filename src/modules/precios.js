@@ -23,6 +23,15 @@ let pctComisionPromedio = 30; // Default 30%, se actualiza con datos reales
 let tipoModificacionActual = 'porcentaje'; // Para registrar en fallos
 let valorModificacionActual = 0; // Para registrar en fallos
 
+// Configuración de costos de ML
+let configCostosEnvio = []; // Rangos de costos por peso
+let configCostosFijos = []; // Rangos de costos fijos por precio
+let configUmbrales = {
+    umbral_envio_gratis: 33000,
+    descuento_envio_pct: 50,
+    peso_default_gr: 500
+};
+
 // Estado para historial de precios
 let tabActual = 'gestion'; // 'gestion' | 'historial'
 let historialData = [];
@@ -52,6 +61,11 @@ export const moduloPrecios = {
                                 class="tab-btn flex-1 px-6 py-4 text-sm font-medium transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50">
                             <i class="fas fa-chart-line mr-2"></i>
                             Historial de Precios
+                        </button>
+                        <button id="tab-config" onclick="moduloPrecios.cambiarTab('config')"
+                                class="tab-btn flex-1 px-6 py-4 text-sm font-medium transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50">
+                            <i class="fas fa-cog mr-2"></i>
+                            Configuración Costos
                         </button>
                     </div>
                 </div>
@@ -103,8 +117,10 @@ export const moduloPrecios = {
 
         if (tabActual === 'gestion') {
             await moduloPrecios.renderGestionPrecios(contenedor);
-        } else {
+        } else if (tabActual === 'historial') {
             await moduloPrecios.renderHistorialPrecios(contenedor);
+        } else if (tabActual === 'config') {
+            await moduloPrecios.renderConfiguracionCostos(contenedor);
         }
     },
 
@@ -170,6 +186,12 @@ export const moduloPrecios = {
                                     Con Fallos
                                     <span id="badge-fallos" class="ml-1 bg-red-600 text-white text-xs px-1.5 py-0.5 rounded-full">0</span>
                                 </button>
+                                <button id="btn-limpiar-fallos" onclick="moduloPrecios.limpiarTodosFallos()"
+                                        class="hidden px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                        title="Descartar todos los fallos pendientes">
+                                    <i class="fas fa-broom mr-1"></i>
+                                    Limpiar
+                                </button>
                             </div>
                         </div>
 
@@ -214,26 +236,40 @@ export const moduloPrecios = {
                 <!-- Tabla de Productos -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="overflow-x-auto">
-                        <table class="w-full">
+                        <table class="w-full" style="table-layout:fixed">
+                            <colgroup>
+                                <col style="width:32px">
+                                <col style="width:11%">
+                                <col style="width:auto">
+                                <col style="width:50px">
+                                <col style="width:80px">
+                                <col style="width:80px">
+                                <col style="width:80px">
+                                <col style="width:24px">
+                                <col style="width:70px">
+                                <col style="width:80px">
+                            </colgroup>
                             <thead class="bg-gray-50 border-b border-gray-200">
                                 <tr>
-                                    <th class="px-4 py-3 text-left w-12">
+                                    <th class="pl-2 pr-1 py-2 text-left">
                                         <input type="checkbox" id="seleccionar-todos"
                                                class="rounded border-gray-300 text-brand focus:ring-brand"
                                                onclick="moduloPrecios.toggleTodos(this.checked)">
                                     </th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Precio Actual</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Nuevo Precio</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Neto Est.</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">+% ML</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                    <th class="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase border-r border-gray-200">Peso</th>
+                                    <th class="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase">Precio</th>
+                                    <th class="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase">Nuevo</th>
+                                    <th class="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase">Neto</th>
+                                    <th class="text-center" title="Envío gratis"><i class="fas fa-truck text-gray-400 text-xs"></i></th>
+                                    <th class="px-1 py-2 text-center text-xs font-bold text-gray-500 uppercase">+%</th>
+                                    <th class="px-1 py-2 text-center text-xs font-bold text-gray-500 uppercase">Est.</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-precios" class="divide-y divide-gray-100">
                                 <tr>
-                                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
+                                    <td colspan="10" class="px-4 py-12 text-center text-gray-500">
                                         <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
                                         <p>Sincronizando precios desde Mercado Libre...</p>
                                     </td>
@@ -384,6 +420,267 @@ export const moduloPrecios = {
 
         // Cargar datos
         await moduloPrecios.cargarHistorial();
+    },
+
+    // ============================================
+    // RENDER: Vista de Configuración de Costos
+    // ============================================
+    renderConfiguracionCostos: async (contenedor) => {
+        contenedor.innerHTML = `
+            <!-- Info -->
+            <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
+                    <div class="text-sm text-blue-800">
+                        <p class="font-medium mb-1">Configuración de Costos de Mercado Libre</p>
+                        <p>Estos valores se usan para calcular el <strong>Neto Estimado</strong> de cada producto.
+                        Incluyen el costo de envío gratis (según peso) y costos fijos (según precio).</p>
+                        <p class="mt-1">Fuente: <a href="https://www.mercadolibre.com.ar/ayuda/costos-envios-gratis_3482" target="_blank" class="underline">Ayuda ML</a></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Umbrales Generales -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-sliders-h text-brand"></i>
+                        Umbrales Generales
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Umbral Envío Gratis con Descuento
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-500">$</span>
+                                <input type="number" id="umbral-envio-gratis"
+                                       value="${configUmbrales.umbral_envio_gratis || 33000}"
+                                       class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Productos >= este precio tienen 50% descuento en envío</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Peso por Defecto (sin dato)
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="peso-default"
+                                       value="${configUmbrales.peso_default_gr || 500}"
+                                       class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <span class="text-gray-500">gramos</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Se usa cuando el producto no tiene peso cargado</p>
+                        </div>
+                        <button onclick="moduloPrecios.guardarUmbrales()"
+                                class="w-full bg-brand text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand/90 transition-colors">
+                            <i class="fas fa-save mr-2"></i>Guardar Umbrales
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Costos Fijos por Precio -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-dollar-sign text-brand"></i>
+                        Costos Fijos por Rango de Precio
+                    </h3>
+                    <p class="text-xs text-gray-500 mb-3">Aplican a productos con precio menor al umbral de envío gratis</p>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500">Desde</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500">Hasta</th>
+                                    <th class="px-2 py-2 text-right text-xs font-bold text-gray-500">Costo Fijo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-costos-fijos" class="divide-y divide-gray-100">
+                                ${configCostosFijos.map(c => `
+                                    <tr>
+                                        <td class="px-2 py-2">${formatearMoneda(c.precio_desde)}</td>
+                                        <td class="px-2 py-2">${formatearMoneda(c.precio_hasta)}</td>
+                                        <td class="px-2 py-2 text-right">
+                                            <input type="number"
+                                                   data-id="${c.id}"
+                                                   data-tipo="fijo"
+                                                   value="${c.costo_fijo}"
+                                                   class="w-20 border border-gray-300 rounded px-2 py-1 text-right text-sm">
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button onclick="moduloPrecios.guardarCostosFijos()"
+                            class="w-full mt-4 bg-brand text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand/90 transition-colors">
+                        <i class="fas fa-save mr-2"></i>Guardar Costos Fijos
+                    </button>
+                </div>
+
+            </div>
+
+            <!-- Costos de Envío por Peso -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6">
+                <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-truck text-brand"></i>
+                    Costos de Envío Gratis por Peso
+                </h3>
+                <p class="text-xs text-gray-500 mb-3">
+                    <strong>Sin descuento:</strong> Productos nuevos < $${(configUmbrales.umbral_envio_gratis || 33000).toLocaleString()} o reputación baja |
+                    <strong>Con descuento 50%:</strong> Productos nuevos >= $${(configUmbrales.umbral_envio_gratis || 33000).toLocaleString()} y reputación verde
+                </p>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-bold text-gray-500">Rango de Peso</th>
+                                <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Sin Descuento</th>
+                                <th class="px-3 py-2 text-right text-xs font-bold text-gray-500">Con Descuento (50%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-costos-envio" class="divide-y divide-gray-100">
+                            ${configCostosEnvio.map(c => {
+                                const pesoDesde = c.peso_desde_gr >= 1000 ? (c.peso_desde_gr / 1000) + ' kg' : c.peso_desde_gr + ' g';
+                                const pesoHasta = c.peso_hasta_gr >= 1000 ? (c.peso_hasta_gr / 1000) + ' kg' : c.peso_hasta_gr + ' g';
+                                return `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-3 py-2 text-gray-600">${pesoDesde} - ${pesoHasta}</td>
+                                        <td class="px-3 py-2 text-right">
+                                            <input type="number"
+                                                   data-id="${c.id}"
+                                                   data-tipo="envio-sin"
+                                                   value="${c.costo_sin_descuento}"
+                                                   class="w-24 border border-gray-300 rounded px-2 py-1 text-right text-sm">
+                                        </td>
+                                        <td class="px-3 py-2 text-right">
+                                            <input type="number"
+                                                   data-id="${c.id}"
+                                                   data-tipo="envio-con"
+                                                   value="${c.costo_con_descuento}"
+                                                   class="w-24 border border-gray-300 rounded px-2 py-1 text-right text-sm">
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <button onclick="moduloPrecios.guardarCostosEnvio()"
+                        class="w-full mt-4 bg-brand text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand/90 transition-colors">
+                    <i class="fas fa-save mr-2"></i>Guardar Costos de Envío
+                </button>
+            </div>
+        `;
+    },
+
+    // ============================================
+    // GUARDAR UMBRALES
+    // ============================================
+    guardarUmbrales: async () => {
+        const umbralEnvio = parseFloat(document.getElementById('umbral-envio-gratis').value) || 33000;
+        const pesoDefault = parseFloat(document.getElementById('peso-default').value) || 500;
+
+        try {
+            await supabase.from('config_umbrales_ml').upsert([
+                { clave: 'umbral_envio_gratis', valor: umbralEnvio, descripcion: 'Precio mínimo para envío gratis con descuento 50%' },
+                { clave: 'peso_default_gr', valor: pesoDefault, descripcion: 'Peso por defecto si no hay dato' }
+            ], { onConflict: 'clave' });
+
+            configUmbrales.umbral_envio_gratis = umbralEnvio;
+            configUmbrales.peso_default_gr = pesoDefault;
+
+            mostrarNotificacion('Umbrales guardados correctamente', 'success');
+        } catch (error) {
+            console.error('Error guardando umbrales:', error);
+            mostrarNotificacion('Error al guardar umbrales', 'error');
+        }
+    },
+
+    // ============================================
+    // GUARDAR COSTOS FIJOS
+    // ============================================
+    guardarCostosFijos: async () => {
+        const inputs = document.querySelectorAll('#tabla-costos-fijos input[data-tipo="fijo"]');
+        const updates = [];
+
+        inputs.forEach(input => {
+            const id = parseInt(input.dataset.id);
+            const valor = parseFloat(input.value) || 0;
+            updates.push({ id, costo_fijo: valor });
+        });
+
+        try {
+            for (const upd of updates) {
+                await supabase
+                    .from('config_costos_fijos_ml')
+                    .update({ costo_fijo: upd.costo_fijo, updated_at: new Date().toISOString() })
+                    .eq('id', upd.id);
+            }
+
+            // Recargar configuración
+            const { data } = await supabase
+                .from('config_costos_fijos_ml')
+                .select('*')
+                .eq('activo', true)
+                .order('precio_desde');
+
+            if (data) configCostosFijos = data;
+
+            mostrarNotificacion('Costos fijos guardados correctamente', 'success');
+        } catch (error) {
+            console.error('Error guardando costos fijos:', error);
+            mostrarNotificacion('Error al guardar costos fijos', 'error');
+        }
+    },
+
+    // ============================================
+    // GUARDAR COSTOS ENVÍO
+    // ============================================
+    guardarCostosEnvio: async () => {
+        const inputsSin = document.querySelectorAll('#tabla-costos-envio input[data-tipo="envio-sin"]');
+        const inputsCon = document.querySelectorAll('#tabla-costos-envio input[data-tipo="envio-con"]');
+        const updates = {};
+
+        inputsSin.forEach(input => {
+            const id = parseInt(input.dataset.id);
+            if (!updates[id]) updates[id] = {};
+            updates[id].costo_sin_descuento = parseFloat(input.value) || 0;
+        });
+
+        inputsCon.forEach(input => {
+            const id = parseInt(input.dataset.id);
+            if (!updates[id]) updates[id] = {};
+            updates[id].costo_con_descuento = parseFloat(input.value) || 0;
+        });
+
+        try {
+            for (const [id, values] of Object.entries(updates)) {
+                await supabase
+                    .from('config_costos_envio_ml')
+                    .update({
+                        costo_sin_descuento: values.costo_sin_descuento,
+                        costo_con_descuento: values.costo_con_descuento,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', parseInt(id));
+            }
+
+            // Recargar configuración
+            const { data } = await supabase
+                .from('config_costos_envio_ml')
+                .select('*')
+                .eq('activo', true)
+                .order('peso_desde_gr');
+
+            if (data) configCostosEnvio = data;
+
+            mostrarNotificacion('Costos de envío guardados correctamente', 'success');
+        } catch (error) {
+            console.error('Error guardando costos de envío:', error);
+            mostrarNotificacion('Error al guardar costos de envío', 'error');
+        }
     },
 
     // ============================================
@@ -640,9 +937,9 @@ export const moduloPrecios = {
             }
 
             // ============================================
-            // PARALELO: Cargar comisión promedio, productos y fallos
+            // PARALELO: Cargar comisión promedio, productos, fallos y config de costos
             // ============================================
-            const [ordenesRes, productosRes, fallosRes] = await Promise.all([
+            const [ordenesRes, productosRes, fallosRes, costosEnvioRes, costosFijosRes, umbralesRes] = await Promise.all([
                 supabase
                     .from('ordenes_meli')
                     .select('pct_costo_meli')
@@ -651,11 +948,27 @@ export const moduloPrecios = {
                     .limit(100),
                 supabase
                     .from('publicaciones_meli')
-                    .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica')
+                    .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica, peso_gr, tiene_envio_gratis')
                     .in('estado', ['active', 'paused']) // Solo activas y pausadas, no cerradas
                     .order('titulo'),
                 supabase
                     .from('v_precios_fallos_pendientes')
+                    .select('*'),
+                // Cargar configuración de costos de envío
+                supabase
+                    .from('config_costos_envio_ml')
+                    .select('*')
+                    .eq('activo', true)
+                    .order('peso_desde_gr'),
+                // Cargar configuración de costos fijos
+                supabase
+                    .from('config_costos_fijos_ml')
+                    .select('*')
+                    .eq('activo', true)
+                    .order('precio_desde'),
+                // Cargar umbrales
+                supabase
+                    .from('config_umbrales_ml')
                     .select('*')
             ]);
 
@@ -664,6 +977,26 @@ export const moduloPrecios = {
                 const suma = ordenesRes.data.reduce((acc, o) => acc + (parseFloat(o.pct_costo_meli) || 0), 0);
                 pctComisionPromedio = suma / ordenesRes.data.length;
                 console.log(`% Comisión promedio: ${pctComisionPromedio.toFixed(2)}% (de ${ordenesRes.data.length} órdenes)`);
+            }
+
+            // Procesar configuración de costos de envío
+            if (costosEnvioRes.data && costosEnvioRes.data.length > 0) {
+                configCostosEnvio = costosEnvioRes.data;
+                console.log(`Cargados ${configCostosEnvio.length} rangos de costos de envío`);
+            }
+
+            // Procesar configuración de costos fijos
+            if (costosFijosRes.data && costosFijosRes.data.length > 0) {
+                configCostosFijos = costosFijosRes.data;
+                console.log(`Cargados ${configCostosFijos.length} rangos de costos fijos`);
+            }
+
+            // Procesar umbrales
+            if (umbralesRes.data && umbralesRes.data.length > 0) {
+                umbralesRes.data.forEach(u => {
+                    configUmbrales[u.clave] = parseFloat(u.valor) || 0;
+                });
+                console.log('Umbrales cargados:', configUmbrales);
             }
 
             // Procesar productos
@@ -689,13 +1022,16 @@ export const moduloPrecios = {
             // Actualizar badge y visibilidad del filtro de fallos
             const cantidadFallos = Object.keys(fallosPendientes).length;
             const btnFallos = document.getElementById('btn-filtro-fallos');
+            const btnLimpiarFallos = document.getElementById('btn-limpiar-fallos');
             const badgeFallos = document.getElementById('badge-fallos');
 
             if (cantidadFallos > 0) {
                 btnFallos?.classList.remove('hidden');
+                btnLimpiarFallos?.classList.remove('hidden');
                 if (badgeFallos) badgeFallos.textContent = cantidadFallos;
             } else {
                 btnFallos?.classList.add('hidden');
+                btnLimpiarFallos?.classList.add('hidden');
                 filtros.fallos = false;
             }
 
@@ -708,7 +1044,7 @@ export const moduloPrecios = {
 
             document.getElementById('tabla-precios').innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-4 py-12 text-center text-red-500">
+                    <td colspan="10" class="px-4 py-12 text-center text-red-500">
                         <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
                         <p>Error al cargar productos. Intenta de nuevo.</p>
                     </td>
@@ -740,7 +1076,7 @@ export const moduloPrecios = {
         if (productosFiltrados.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
+                    <td colspan="10" class="px-4 py-12 text-center text-gray-500">
                         <i class="fas fa-inbox fa-2x mb-2"></i>
                         <p>No se encontraron productos</p>
                     </td>
@@ -762,22 +1098,41 @@ export const moduloPrecios = {
             const falloInfo = fallosPendientes[p.sku];
             const tieneFallo = !!falloInfo;
 
-            // Calcular neto estimado
-            // Prioridad 1: usar campos de comisión de la BD (poblados por sync-prices)
-            // Prioridad 2: usar % promedio de órdenes como fallback
+            // Calcular neto estimado COMPLETO
+            // Incluye: comisión + cargo fijo ML + impuestos + costo de envío gratis
             const precioParaNeto = precioModificado ? p.precioNuevo : precioOriginal;
             const comision = parseFloat(p.comision_ml) || 0;
-            const cargoFijo = parseFloat(p.cargo_fijo_ml) || 0;
+            const cargoFijoML = parseFloat(p.cargo_fijo_ml) || 0;
             const impuestos = parseFloat(p.impuestos_estimados) || 0;
+            const pesoGr = parseFloat(p.peso_gr) || 0;
+            const tieneEnvioGratis = p.tiene_envio_gratis === true;
+
+            // Calcular costo de envío gratis SOLO si el producto tiene envío gratis
+            const costoEnvio = tieneEnvioGratis
+                ? moduloPrecios.calcularCostoEnvio(pesoGr, precioParaNeto)
+                : 0;
+
+            // Calcular costo fijo por rango de precio (complementa al cargo_fijo_ml de ML)
+            // Nota: cargo_fijo_ml ya viene de ML, pero a veces no incluye todos los costos
+            const costoFijoRango = moduloPrecios.calcularCostoFijo(precioParaNeto);
+
+            // Usar el mayor entre cargo_fijo_ml y costo_fijo_rango (evitar duplicar)
+            const cargoFijoFinal = Math.max(cargoFijoML, costoFijoRango);
 
             let netoEstimado;
-            if (comision > 0 || cargoFijo > 0) {
-                // Usar comisiones reales de ML
-                netoEstimado = precioParaNeto - comision - cargoFijo - impuestos;
+            if (comision > 0 || cargoFijoFinal > 0 || costoEnvio > 0) {
+                // Usar costos reales/calculados
+                netoEstimado = precioParaNeto - comision - cargoFijoFinal - impuestos - costoEnvio;
             } else {
                 // Fallback: usar % promedio de órdenes
                 netoEstimado = precioParaNeto * (1 - pctComisionPromedio / 100);
             }
+
+            // Guardar costos para mostrar en tooltip
+            p._costoEnvio = costoEnvio;
+            p._costoFijo = cargoFijoFinal;
+            p._comision = comision;
+            p._impuestos = impuestos;
 
             // Calcular % markup sobre neto (cuánto hay que cargarle al neto para llegar al precio)
             const pctMarkup = netoEstimado > 0 ? ((precioParaNeto - netoEstimado) / netoEstimado * 100).toFixed(1) : 0;
@@ -787,50 +1142,82 @@ export const moduloPrecios = {
                 ? 'row-con-fallo'
                 : (precioModificado ? 'bg-yellow-50' : '');
 
+            // Formatear precios estilo contable ($ alineado izq, número alineado der)
+            const formatoContable = (monto) => {
+                const num = parseFloat(monto) || 0;
+                return num.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            };
+
             return `
                 <tr class="hover:bg-gray-50 transition-colors ${rowClass}">
-                    <td class="px-4 py-3">
+                    <td class="pl-2 pr-1 py-2">
                         <input type="checkbox"
                                class="rounded border-gray-300 text-brand focus:ring-brand"
                                ${isSelected ? 'checked' : ''}
                                onchange="moduloPrecios.toggleSeleccion('${p.sku}', this.checked)">
                     </td>
-                    <td class="px-4 py-3 font-mono text-sm text-gray-600">
-                        ${p.sku || '-'}
+                    <td class="px-2 py-2 font-mono text-xs text-gray-600">
+                        <div class="truncate">${p.sku || '-'}</div>
                         ${tieneFallo ? `
-                            <span class="ml-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full" title="Fallos pendientes de actualización">
+                            <span class="bg-red-500 text-white text-xs px-1 py-0.5 rounded-full" title="Fallos pendientes">
                                 ${falloInfo.cantidad}
                             </span>
                         ` : ''}
                     </td>
-                    <td class="px-4 py-3">
-                        <div class="max-w-lg truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                    <td class="px-2 py-2">
+                        <div class="truncate text-xs" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                         ${tieneFallo ? `
                             <div class="text-xs text-red-600 mt-1">
                                 <i class="fas fa-exclamation-triangle mr-1"></i>
-                                Precio pendiente: ${formatearMoneda(falloInfo.ultimoPrecio)}
+                                Pendiente: ${formatearMoneda(falloInfo.ultimoPrecio)}
                                 <button onclick="moduloPrecios.reintentarFallo('${p.sku}')"
-                                        class="ml-2 text-blue-600 hover:text-blue-800 underline">
-                                    <i class="fas fa-redo mr-1"></i>Reintentar
+                                        class="ml-1 text-blue-600 hover:text-blue-800 underline">
+                                    <i class="fas fa-redo"></i>
                                 </button>
                             </div>
                         ` : ''}
                     </td>
-                    <td class="px-4 py-3 text-right font-medium ${precioModificado ? 'line-through text-gray-400' : 'text-gray-800'}">
-                        ${formatearMoneda(precioOriginal)}
+                    <td class="px-2 py-2 text-right text-xs ${pesoGr > 0 ? 'text-gray-600' : 'text-gray-400'} border-r border-gray-200">
+                        ${pesoGr > 0 ? (pesoGr >= 1000 ? (pesoGr / 1000).toFixed(1) + 'kg' : pesoGr + 'g') : '-'}
                     </td>
-                    <td class="px-4 py-3 text-right">
+                    <td class="px-2 py-2 ${precioModificado ? 'line-through text-gray-400' : 'text-gray-800'}">
+                        <div class="flex justify-between text-xs font-medium">
+                            <span>$</span>
+                            <span>${formatoContable(precioOriginal)}</span>
+                        </div>
+                    </td>
+                    <td class="px-2 py-2">
                         ${precioModificado ? `
-                            <span class="font-bold text-green-600">${formatearMoneda(p.precioNuevo)}</span>
-                            <span class="text-xs ${diferencia > 0 ? 'text-green-600' : 'text-red-600'} ml-1">
+                            <div class="flex justify-between text-xs font-bold text-green-600">
+                                <span>$</span>
+                                <span>${formatoContable(p.precioNuevo)}</span>
+                            </div>
+                            <div class="text-xs ${diferencia > 0 ? 'text-green-600' : 'text-red-600'} text-right">
                                 (${diferencia > 0 ? '+' : ''}${diferencia}%)
-                            </span>
-                        ` : '<span class="text-gray-400">-</span>'}
+                            </div>
+                        ` : '<div class="text-gray-400 text-xs text-center">-</div>'}
                     </td>
-                    <td class="px-4 py-3 text-right text-gray-600">${netoEstimado > 0 ? formatearMoneda(netoEstimado) : '-'}</td>
-                    <td class="px-4 py-3 text-center text-xs font-medium text-orange-600">+${pctMarkup}%</td>
-                    <td class="px-4 py-3 text-center">
-                        <span class="px-2 py-1 rounded-full text-xs font-bold ${estadoColor}">${estadoTexto}</span>
+                    <td class="px-2 py-2">
+                        ${netoEstimado > 0 ? `
+                            <div class="flex justify-between text-xs text-gray-600 cursor-help" title="Desglose:
+• Precio: ${formatearMoneda(precioParaNeto)}
+• Comisión ML: -${formatearMoneda(p._comision)}
+• Costo fijo: -${formatearMoneda(p._costoFijo)}
+• Impuestos: -${formatearMoneda(p._impuestos)}
+• Envío gratis: -${formatearMoneda(p._costoEnvio)}
+─────────────────
+• NETO: ${formatearMoneda(netoEstimado)}">
+                                <span>$</span>
+                                <span>${formatoContable(netoEstimado)}</span>
+                            </div>
+                        ` : '<div class="text-gray-400 text-xs text-center">-</div>'}
+                    </td>
+                    <td class="text-center">
+                        ${costoEnvio > 0 ? '<i class="fas fa-truck text-blue-500 text-xs" title="Tiene costo de envío gratis"></i>' : ''}
+                    </td>
+                    <td class="px-1 py-2 text-center text-xs font-medium text-orange-600">+${pctMarkup}%</td>
+                    <td class="px-1 py-2 text-center">
+                        <span class="px-1.5 py-0.5 rounded-full text-xs font-bold ${estadoColor}">${estadoTexto}</span>
                     </td>
                 </tr>
             `;
@@ -866,6 +1253,59 @@ export const moduloPrecios = {
             }
         });
         document.getElementById('contador-seleccion').textContent = seleccionados.size;
+    },
+
+    // ============================================
+    // CALCULAR COSTO DE ENVÍO según peso y precio
+    // ============================================
+    calcularCostoEnvio: (pesoGr, precio) => {
+        // Si no hay configuración, retornar 0
+        if (!configCostosEnvio || configCostosEnvio.length === 0) {
+            return 0;
+        }
+
+        // Determinar si tiene descuento (precio >= umbral)
+        const umbral = configUmbrales.umbral_envio_gratis || 33000;
+        const tieneDescuento = precio >= umbral;
+
+        // Usar peso por defecto si no hay dato
+        const pesoEfectivo = pesoGr && pesoGr > 0
+            ? pesoGr
+            : (configUmbrales.peso_default_gr || 500);
+
+        // Buscar costo según peso
+        const rango = configCostosEnvio.find(r =>
+            pesoEfectivo >= r.peso_desde_gr && pesoEfectivo < r.peso_hasta_gr
+        );
+
+        if (!rango) {
+            // Si no encuentra rango, usar el último (más pesado)
+            const ultimoRango = configCostosEnvio[configCostosEnvio.length - 1];
+            return tieneDescuento
+                ? parseFloat(ultimoRango.costo_con_descuento) || 0
+                : parseFloat(ultimoRango.costo_sin_descuento) || 0;
+        }
+
+        return tieneDescuento
+            ? parseFloat(rango.costo_con_descuento) || 0
+            : parseFloat(rango.costo_sin_descuento) || 0;
+    },
+
+    // ============================================
+    // CALCULAR COSTO FIJO según precio
+    // ============================================
+    calcularCostoFijo: (precio) => {
+        // Si no hay configuración, retornar 0
+        if (!configCostosFijos || configCostosFijos.length === 0) {
+            return 0;
+        }
+
+        // Buscar costo según precio
+        const rango = configCostosFijos.find(r =>
+            precio >= r.precio_desde && precio < r.precio_hasta
+        );
+
+        return rango ? parseFloat(rango.costo_fijo) || 0 : 0;
     },
 
     // ============================================
@@ -1255,6 +1695,52 @@ export const moduloPrecios = {
         } catch (error) {
             console.error('Error descartando fallo:', error);
             mostrarNotificacion('Error al descartar', 'error');
+        }
+    },
+
+    // ============================================
+    // LIMPIAR TODOS LOS FALLOS: Descarta todos los fallos pendientes
+    // ============================================
+    limpiarTodosFallos: async () => {
+        const cantidadFallos = Object.keys(fallosPendientes).length;
+
+        if (cantidadFallos === 0) {
+            mostrarNotificacion('No hay fallos pendientes', 'info');
+            return;
+        }
+
+        const confirmar = await confirmarAccion(
+            'Limpiar Todos los Fallos',
+            `¿Descartar los ${cantidadFallos} fallos pendientes? Los precios no se actualizarán en ML.`,
+            'warning',
+            'Sí, Limpiar Todo'
+        );
+
+        if (!confirmar) return;
+
+        try {
+            // Marcar todos los fallos pendientes como descartados
+            const { error } = await supabase
+                .from('precios_actualizacion_fallidas')
+                .update({ estado: 'descartado' })
+                .eq('estado', 'pendiente');
+
+            if (error) throw error;
+
+            mostrarNotificacion(`${cantidadFallos} fallos descartados`, 'success');
+
+            // Limpiar filtro de fallos si estaba activo
+            filtros.fallos = false;
+            document.getElementById('btn-filtro-fallos')?.classList.remove('active');
+            document.querySelectorAll('.btn-filtro-estado').forEach(b => b.classList.remove('active'));
+            document.querySelector('.btn-filtro-estado[data-estado="todos"]')?.classList.add('active');
+
+            // Recargar productos
+            await moduloPrecios.cargarProductos();
+
+        } catch (error) {
+            console.error('Error limpiando fallos:', error);
+            mostrarNotificacion('Error al limpiar fallos', 'error');
         }
     }
 };

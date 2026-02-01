@@ -184,6 +184,7 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
         try {
           // Multiget con atributos específicos (igual que GAS)
+          // Incluimos shipping para obtener peso y dimensiones
           const batchResponse = await fetch(
             `${ML_API_BASE}/items?ids=${batchIds.join(',')}&attributes=id,title,price,status,shipping,user_product_id,seller_custom_field,attributes,variations,inventory_id,available_quantity`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
@@ -241,6 +242,49 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
             const tipoLogistica = shipping.logistic_type || 'desconocido'
             const shippingTags = shipping.tags || []
             const tieneFlex = shippingTags.includes('self_service_in')
+            const tieneEnvioGratis = shipping.free_shipping || false
+
+            // ============================================
+            // Extraer peso y dimensiones del shipping
+            // ============================================
+            const dimensions = shipping.dimensions || {}
+            // Peso: puede venir en gramos o en string "500 g"
+            let pesoGr: number | null = null
+            if (dimensions.weight) {
+              if (typeof dimensions.weight === 'number') {
+                pesoGr = dimensions.weight
+              } else if (typeof dimensions.weight === 'string') {
+                // Parsear strings como "500 g" o "1.5 kg"
+                const match = dimensions.weight.match(/^([\d.]+)\s*(g|kg)?$/i)
+                if (match) {
+                  pesoGr = parseFloat(match[1])
+                  if (match[2]?.toLowerCase() === 'kg') {
+                    pesoGr *= 1000
+                  }
+                }
+              }
+            }
+
+            // Dimensiones en cm (ML las devuelve en diferentes formatos)
+            let altoCm: number | null = null
+            let anchoCm: number | null = null
+            let largoCm: number | null = null
+
+            if (dimensions.height) {
+              altoCm = typeof dimensions.height === 'number'
+                ? dimensions.height
+                : parseFloat(dimensions.height) || null
+            }
+            if (dimensions.width) {
+              anchoCm = typeof dimensions.width === 'number'
+                ? dimensions.width
+                : parseFloat(dimensions.width) || null
+            }
+            if (dimensions.length) {
+              largoCm = typeof dimensions.length === 'number'
+                ? dimensions.length
+                : parseFloat(dimensions.length) || null
+            }
 
             // ============================================
             // Obtener stock distribuido via user_product_id
@@ -310,18 +354,27 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
 
             // ============================================
             // Preservar datos existentes si el nuevo valor es null
+            // IMPORTANTE: No sobrescribir valores editados manualmente
             // ============================================
             const { data: existingRecord } = await supabase
               .from('publicaciones_meli')
-              .select('sku, id_inventario')
+              .select('sku, id_inventario, peso_gr, alto_cm, ancho_cm, largo_cm')
               .eq('id_publicacion', item.id)
               .single()
 
             const finalSku = skuFromApi || existingRecord?.sku || null
             const finalInventoryId = inventoryId || existingRecord?.id_inventario || null
 
+            // Preservar peso y dimensiones manuales si ya existen en BD
+            // Solo actualizar si el valor en BD está vacío
+            const finalPesoGr = existingRecord?.peso_gr || pesoGr
+            const finalAltoCm = existingRecord?.alto_cm || altoCm
+            const finalAnchoCm = existingRecord?.ancho_cm || anchoCm
+            const finalLargoCm = existingRecord?.largo_cm || largoCm
+
             // ============================================
             // Actualizar en Supabase con todos los campos
+            // Incluye peso, dimensiones y envío gratis
             // ============================================
             const { error } = await supabase
               .from('publicaciones_meli')
@@ -333,11 +386,17 @@ async function syncInventoryInternal(supabase: any, accessToken: string, sellerI
                 stock_deposito: stockDeposito,
                 stock_transito: stockTransito,
                 tiene_flex: tieneFlex,
+                tiene_envio_gratis: tieneEnvioGratis,
                 user_product_id: userProductId || null,
                 id_inventario: finalInventoryId,
                 tipo_logistica: tipoLogistica,
                 precio: item.price,
                 estado: item.status,
+                // Peso y dimensiones (preserva valores manuales)
+                peso_gr: finalPesoGr,
+                alto_cm: finalAltoCm,
+                ancho_cm: finalAnchoCm,
+                largo_cm: finalLargoCm,
                 ultima_sync: new Date().toISOString()
               }, { onConflict: 'id_publicacion' })
 

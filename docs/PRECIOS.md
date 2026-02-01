@@ -2,7 +2,17 @@
 
 ## Descripción
 
-Permite visualizar, modificar y actualizar precios de publicaciones en Mercado Libre de forma masiva, con previsualización y redondeo psicológico automático.
+Permite visualizar, modificar y actualizar precios de publicaciones en Mercado Libre de forma masiva, con previsualización, redondeo psicológico automático y cálculo de costos de envío gratis.
+
+---
+
+## Tabs Disponibles
+
+El módulo tiene 3 tabs:
+
+1. **Gestión de Precios**: Tabla principal para ver y modificar precios
+2. **Historial de Precios**: Evolución de precios basado en órdenes de venta
+3. **Configuración Costos**: Configurar costos de envío y fijos de ML
 
 ---
 
@@ -75,23 +85,75 @@ function redondearPrecioPsicologico(precio) {
 |---------|-------------|
 | SKU | Código del producto |
 | Producto | Título de la publicación |
-| Precio Actual | Precio vigente en ML |
-| Nuevo Precio | Precio calculado (después de previsualizar) |
-| Neto Est. | Precio - Comisiones - Impuestos |
-| +% ML | Markup sobre neto (cuánto carga ML) |
-| Estado | Activa / Pausada |
+| Peso | Peso del producto (para cálculo de envío) |
+| Precio | Precio vigente en ML |
+| Nuevo | Precio calculado (después de previsualizar) |
+| Neto | Precio - Comisiones - Impuestos - Envío gratis |
+| 🚚 | Indica si tiene costo de envío gratis |
+| +% | Markup sobre neto (cuánto carga ML) |
+| Est. | Estado: Activa / Pausada |
 
 ---
 
-## Cálculo del Neto Estimado
+## Cálculo del Neto Estimado (v1.7.0)
 
-El neto se calcula usando las comisiones reales de ML obtenidas del endpoint `/sites/MLA/listing_prices`:
+El neto ahora incluye los costos de envío gratis:
 
 ```
-Neto = Precio - Comisión - Cargo Fijo - Impuestos
+Neto = Precio - Comisión - Cargo Fijo - Impuestos - Costo Envío Gratis
 ```
 
-Si las comisiones no están disponibles, usa el **% promedio de las últimas 100 órdenes** como fallback.
+### Costo de Envío Gratis
+
+- **Solo aplica** si el producto tiene `tiene_envio_gratis = true`
+- El costo depende del **peso** del producto
+- Si el precio >= $33,000, se aplica 50% de descuento en envío
+
+### Desglose (Tooltip)
+
+Al pasar el mouse sobre el Neto, se muestra:
+- Precio
+- Comisión ML
+- Costo fijo
+- Impuestos
+- Envío gratis
+- **NETO**
+
+---
+
+## Configuración de Costos ML (v1.7.0)
+
+Nueva pestaña para configurar los costos que aplica Mercado Libre.
+
+### Tabla: config_umbrales_ml
+
+| Clave | Valor Default | Descripción |
+|-------|---------------|-------------|
+| umbral_envio_gratis | 33000 | Precio mínimo para 50% descuento en envío |
+| peso_default_gr | 500 | Peso por defecto si no hay dato |
+
+### Tabla: config_costos_fijos_ml
+
+Costos fijos según rango de precio (para productos < umbral):
+
+| Desde | Hasta | Costo Fijo |
+|-------|-------|------------|
+| $0 | $15,000 | $1,115 |
+| $15,000 | $25,000 | $2,300 |
+| $25,000 | $33,000 | $2,810 |
+| $33,000+ | - | $0 |
+
+### Tabla: config_costos_envio_ml
+
+Costos de envío gratis según peso:
+
+| Peso | Sin Descuento | Con Descuento (50%) |
+|------|---------------|---------------------|
+| 0-300g | $10,766 | $5,383 |
+| 300-500g | $11,646 | $5,823 |
+| 500g-1kg | $12,526 | $6,263 |
+| 1-2kg | $14,001 | $7,001 |
+| ... | ... | ... |
 
 ---
 
@@ -111,16 +173,15 @@ Ejemplo: Si el neto es $10,000 y el precio $14,300, el markup es +43%.
 
 ### Acción: sync-prices
 
-Sincroniza precios y comisiones desde ML. Se ejecuta al entrar a la sección.
+Sincroniza precios, comisiones, peso y envío gratis desde ML.
 
 ```typescript
 // Obtiene:
 - item.price
 - item.category_id
 - item.listing_type_id
-
-// Llama a:
-/sites/MLA/listing_prices?price=X&listing_type_id=Y&category_id=Z
+- item.shipping.free_shipping
+- item.shipping.dimensions.weight
 
 // Guarda en publicaciones_meli:
 - precio
@@ -130,6 +191,8 @@ Sincroniza precios y comisiones desde ML. Se ejecuta al entrar a la sección.
 - cargo_fijo_ml
 - impuestos_estimados
 - neto_estimado
+- tiene_envio_gratis
+- peso_gr (preserva valores manuales)
 ```
 
 ### Acción: update-prices
@@ -148,32 +211,7 @@ body: { price: nuevoPrecio }
 
 ---
 
-## Tabla: historial_cambio_precios
-
-Auditoría de todos los cambios de precios realizados.
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | SERIAL | PK |
-| fecha_cambio | TIMESTAMP | Cuándo se cambió |
-| item_id | TEXT | ID publicación ML |
-| sku | TEXT | SKU del producto |
-| precio_anterior | NUMERIC | Precio antes |
-| precio_nuevo | NUMERIC | Precio después |
-
----
-
-## Archivos Relacionados
-
-| Archivo | Descripción |
-|---------|-------------|
-| `src/modules/precios.js` | Módulo frontend |
-| `src/router.js` | Ruta habilitada |
-| `supabase/functions/sync-meli/index.ts` | Edge Function |
-
----
-
-## Sistema de Tracking de Fallos (v1.1.0)
+## Sistema de Tracking de Fallos
 
 Cuando una actualización de precio falla (ej: producto con promoción activa), el sistema registra el fallo para poder reintentar posteriormente.
 
@@ -197,6 +235,7 @@ Cuando una actualización de precio falla (ej: producto con promoción activa), 
 ### Indicadores Visuales
 
 - **Filtro "Con Fallos"**: Botón rojo que aparece solo si hay fallos pendientes
+- **Botón "Limpiar"**: Descarta todos los fallos pendientes de una vez
 - **Badge rojo**: Junto al SKU muestra cantidad de intentos fallidos
 - **Fila roja**: Productos con fallos pendientes aparecen destacados
 - **Precio pendiente**: Muestra el precio que se intentó aplicar
@@ -212,25 +251,27 @@ Cuando una actualización de precio falla (ej: producto con promoción activa), 
    └── Productos con fallos aparecen en rojo
    └── Badge muestra cantidad de fallos
    └── Filtro "Con Fallos" visible
+   └── Botón "Limpiar" visible
 
-3. Click en "Reintentar"
-   └── Reintenta actualizar ese producto
-   └── Si éxito: marca como 'resuelto'
-   └── Si falla: registra nuevo intento
+3. Opciones:
+   └── Click "Reintentar": intenta actualizar ese producto
+   └── Click "Limpiar": descarta todos los fallos
 
 4. Auto-resolución
    └── Si un producto con fallo previo se actualiza exitosamente
    └── Se marcan como 'resuelto' los fallos anteriores
 ```
 
-### Vista: v_precios_fallos_pendientes
+---
 
-Vista para consultar fallos agrupados por SKU:
+## Archivos Relacionados
 
-```sql
-SELECT sku, id_publicacion, cantidad_fallos, ultimo_intento, ultimo_precio_intentado
-FROM v_precios_fallos_pendientes;
-```
+| Archivo | Descripción |
+|---------|-------------|
+| `src/modules/precios.js` | Módulo frontend |
+| `src/router.js` | Ruta habilitada |
+| `supabase/functions/sync-meli/index.ts` | Edge Function |
+| `supabase/migration_costos_ml.sql` | Migración tablas de costos |
 
 ---
 
@@ -240,8 +281,9 @@ FROM v_precios_fallos_pendientes;
 - El botón "Guardar" es el que efectivamente envía a ML
 - Si un producto tiene promoción activa, ML puede rechazar el cambio de precio
 - Los filtros permiten buscar por SKU/título y filtrar por estado
-- **Nuevo**: Los fallos se registran para poder reintentar después
+- El costo de envío solo se calcula si `tiene_envio_gratis = true`
+- Los valores de peso/dimensiones manuales se preservan durante la sincronización
 
 ---
 
-*Última actualización: Enero 2026*
+*Última actualización: Febrero 2026 - v1.7.0*
