@@ -132,16 +132,25 @@ export const moduloStock = {
                 <!-- Tabla de Stock -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="overflow-x-auto">
-                        <table class="w-full">
+                        <table class="w-full" style="table-layout:fixed">
+                            <colgroup>
+                                <col style="width:140px">
+                                <col style="width:auto">
+                                <col style="width:110px">
+                                <col style="width:90px">
+                                <col style="width:80px">
+                                <col style="width:60px">
+                                <col style="width:90px">
+                            </colgroup>
                             <thead class="bg-gray-50 border-b border-gray-200">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
-                                    <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Depósito</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Flex</th>
-                                    <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
+                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
+                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Depósito</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
+                                    <th class="px-1 py-3 text-center text-xs font-bold text-gray-500 uppercase">Flex</th>
+                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-stock" class="divide-y divide-gray-100">
@@ -321,26 +330,26 @@ export const moduloStock = {
 
             return `
                 <tr class="hover:bg-gray-50 transition-colors" data-item-id="${p.id_publicacion}">
-                    <td class="px-4 py-3 font-mono text-sm text-gray-600">${p.sku || '-'}</td>
-                    <td class="px-4 py-3">
-                        <div class="max-w-xs truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                    <td class="px-3 py-2 font-mono text-xs text-gray-600 truncate">${p.sku || '-'}</td>
+                    <td class="px-3 py-2">
+                        <div class="truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
-                    <td class="px-4 py-3 text-right">
+                    <td class="px-2 py-2 text-right">
                         <input type="number"
-                               class="stock-deposito-input w-20 px-2 py-1 text-right border border-gray-300 rounded focus:ring-2 focus:ring-brand focus:border-transparent"
+                               class="stock-deposito-input w-full px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand focus:border-transparent"
                                value="${stockDeposito}"
                                data-item-id="${p.id_publicacion}"
                                data-original="${stockDeposito}"
                                min="0">
                     </td>
-                    <td class="px-4 py-3 text-right font-medium ${stockCritico ? 'text-red-600' : 'text-gray-800'}">
+                    <td class="px-2 py-2 text-right text-sm font-medium ${stockCritico ? 'text-red-600' : 'text-gray-800'}">
                         ${formatearNumero(stockFull)}
                         ${stockCritico ? '<i class="fas fa-exclamation-triangle text-red-500 ml-1" title="Sin stock"></i>' : ''}
                     </td>
-                    <td class="px-4 py-3 text-center">
-                        <span class="px-2 py-1 rounded-full text-xs font-bold ${logisticaColor}">${logisticaTexto}</span>
+                    <td class="px-2 py-2 text-center">
+                        <span class="px-1.5 py-0.5 rounded-full text-xs font-bold ${logisticaColor}">${logisticaTexto}</span>
                     </td>
-                    <td class="px-4 py-3 text-center">
+                    <td class="px-1 py-2 text-center">
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox"
                                    class="flex-toggle sr-only peer"
@@ -351,8 +360,8 @@ export const moduloStock = {
                             <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-brand rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 ${flexDisabled ? 'opacity-50 cursor-not-allowed' : ''}"></div>
                         </label>
                     </td>
-                    <td class="px-4 py-3 text-center">
-                        <select class="estado-select border border-gray-300 rounded px-2 py-1 text-xs ${estadoColor}"
+                    <td class="px-2 py-2 text-center">
+                        <select class="estado-select border border-gray-300 rounded px-1 py-1 text-xs ${estadoColor}"
                                 data-item-id="${p.id_publicacion}"
                                 data-original="${p.estado}">
                             <option value="active" ${p.estado === 'active' ? 'selected' : ''}>Activa</option>
