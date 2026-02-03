@@ -923,14 +923,8 @@ export const moduloCalculadora = {
             return;
         }
 
-        // Aplicar filtro de categoría Pareto
-        let sugerenciasFiltradas = sugerencias;
-        if (filtroCategoria !== 'todas') {
-            sugerenciasFiltradas = sugerencias.filter(s => {
-                const info = clasificacionPareto[s.id_publicacion];
-                return info && info.categoria === filtroCategoria;
-            });
-        }
+        // Aplicar filtros (categoría Pareto + texto)
+        const sugerenciasFiltradas = moduloCalculadora.obtenerSugerenciasFiltradas();
 
         if (sugerenciasFiltradas.length === 0) {
             tbody.innerHTML = `
