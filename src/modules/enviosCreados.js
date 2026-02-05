@@ -1697,6 +1697,45 @@ export const moduloEnviosCreados = {
     autoSaveTimeout: null, // Timer para debounce del auto-guardado
     realtimeChannel: null, // Canal de Supabase Realtime para multi-usuario
     realtimeDebounce: null, // Timer para debounce de cambios Realtime
+    timerInterval: null, // Interval del cronómetro de preparación
+    tiempoInicioPrep: null, // Fecha/hora de inicio de preparación
+
+    // Iniciar cronómetro de preparación
+    iniciarTimer: (fechaInicio) => {
+        // Limpiar timer anterior si existe
+        if (moduloEnviosCreados.timerInterval) {
+            clearInterval(moduloEnviosCreados.timerInterval);
+        }
+
+        moduloEnviosCreados.tiempoInicioPrep = fechaInicio || new Date();
+
+        const actualizarTimer = () => {
+            const ahora = new Date();
+            const diff = Math.floor((ahora - moduloEnviosCreados.tiempoInicioPrep) / 1000);
+            const horas = Math.floor(diff / 3600).toString().padStart(2, '0');
+            const minutos = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
+            const segundos = (diff % 60).toString().padStart(2, '0');
+
+            const timerEl = document.getElementById('tiempo-preparacion');
+            if (timerEl) {
+                timerEl.innerHTML = `<i class="fas fa-clock mr-1"></i> ${horas}:${minutos}:${segundos}`;
+                timerEl.classList.remove('text-gray-500');
+                timerEl.classList.add('text-green-600', 'font-bold');
+            }
+        };
+
+        // Actualizar inmediatamente y luego cada segundo
+        actualizarTimer();
+        moduloEnviosCreados.timerInterval = setInterval(actualizarTimer, 1000);
+    },
+
+    // Detener cronómetro
+    detenerTimer: () => {
+        if (moduloEnviosCreados.timerInterval) {
+            clearInterval(moduloEnviosCreados.timerInterval);
+            moduloEnviosCreados.timerInterval = null;
+        }
+    },
 
     iniciarPreparacion: async (idEnvio) => {
         const envio = enviosCache.find(e => e.id_envio === idEnvio);
@@ -1729,6 +1768,16 @@ export const moduloEnviosCreados = {
                 p_preparacion_id: preparacionRRHH.id,
                 p_colaborador_id: preparacionRRHH.asignado_a_id
             });
+            // Recargar preparación para obtener fecha_inicio
+            preparacionRRHH = await obtenerPreparacionRRHH(envio.id_envio);
+        }
+
+        // Iniciar timer si la preparación está EN_PROCESO
+        if (preparacionRRHH && preparacionRRHH.estado === 'EN_PROCESO' && preparacionRRHH.fecha_inicio) {
+            moduloEnviosCreados.iniciarTimer(new Date(preparacionRRHH.fecha_inicio));
+        } else {
+            // Si no hay preparación en RRHH, iniciar timer desde ahora
+            moduloEnviosCreados.iniciarTimer(new Date());
         }
 
         // Verificar si hay progreso guardado
@@ -2049,33 +2098,67 @@ export const moduloEnviosCreados = {
     },
 
     // ============================================
-    // REALTIME: Suscribirse a cambios de otros usuarios
+    // REALTIME: Suscribirse a cambios en preparaciones (RRHH)
     // ============================================
     suscribirseRealtime: (idEnvio) => {
         // Desuscribirse del canal anterior si existe
         if (moduloEnviosCreados.realtimeChannel) {
-            supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+            supabaseRRHH.removeChannel(moduloEnviosCreados.realtimeChannel);
         }
 
-        // Crear nuevo canal para este envío
-        moduloEnviosCreados.realtimeChannel = supabase
-            .channel(`preparacion-${idEnvio}`)
+        // Crear nuevo canal para este envío - escuchar tabla preparaciones en RRHH
+        moduloEnviosCreados.realtimeChannel = supabaseRRHH
+            .channel(`preparacion-rrhh-${idEnvio}`)
             .on(
                 'postgres_changes',
                 {
                     event: '*', // INSERT, UPDATE, DELETE
                     schema: 'public',
-                    table: 'preparacion_en_curso',
-                    filter: `id_envio=eq.${idEnvio}`
+                    table: 'preparaciones',
+                    filter: `id_origen=eq.${idEnvio}`
                 },
                 (payload) => {
-                    console.log('[Realtime] Cambio recibido:', payload);
-                    moduloEnviosCreados.procesarCambioRealtime(payload);
+                    console.log('[Realtime RRHH] Cambio en preparaciones:', payload);
+                    moduloEnviosCreados.procesarCambioRealtimeRRHH(payload);
                 }
             )
             .subscribe((status) => {
-                console.log('[Realtime] Estado suscripción:', status);
+                console.log('[Realtime RRHH] Estado suscripción:', status);
             });
+    },
+
+    // ============================================
+    // REALTIME: Procesar cambio desde RRHH (asignación, inicio, etc.)
+    // ============================================
+    procesarCambioRealtimeRRHH: async (payload) => {
+        if (!moduloEnviosCreados.preparacionActiva) return;
+
+        const prep = payload.new;
+        if (!prep) return;
+
+        console.log('[Realtime RRHH] Procesando:', prep.estado, prep.asignado_a_nombre);
+
+        // Actualizar variable global
+        preparacionRRHH = prep;
+
+        // Actualizar selector de preparador si existe
+        const selectPrep = document.getElementById('select-preparador');
+        if (selectPrep && prep.asignado_a_id) {
+            selectPrep.value = prep.asignado_a_id;
+        }
+
+        // Si se inició desde PWA, iniciar el timer
+        if (prep.estado === 'EN_PROCESO' && prep.fecha_inicio && !moduloEnviosCreados.timerInterval) {
+            moduloEnviosCreados.iniciarTimer(new Date(prep.fecha_inicio));
+            mostrarNotificacion(`Preparación iniciada por ${prep.asignado_a_nombre}`, 'info');
+        }
+
+        // Si se completó desde otro lado
+        if (prep.estado === 'COMPLETADO') {
+            mostrarNotificacion('Preparación completada', 'success');
+            // Volver al listado
+            setTimeout(() => moduloEnviosCreados.volverDePreparacion(), 1500);
+        }
     },
 
     // ============================================
@@ -2503,9 +2586,12 @@ export const moduloEnviosCreados = {
             await moduloEnviosCreados.autoGuardarProgreso();
         }
 
-        // Desuscribirse de Realtime si existe
+        // Detener timer de preparación
+        moduloEnviosCreados.detenerTimer();
+
+        // Desuscribirse de Realtime RRHH si existe
         if (moduloEnviosCreados.realtimeChannel) {
-            supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+            supabaseRRHH.removeChannel(moduloEnviosCreados.realtimeChannel);
             moduloEnviosCreados.realtimeChannel = null;
         }
 
@@ -2513,6 +2599,7 @@ export const moduloEnviosCreados = {
         moduloEnviosCreados.preparacionActiva = null;
         moduloEnviosCreados.productosPreparacion = [];
         moduloEnviosCreados.ultimoSkuFoco = null;
+        moduloEnviosCreados.tiempoInicioPrep = null;
 
         // Volver a la lista
         const contenedor = document.getElementById('app-content');
@@ -2805,9 +2892,12 @@ export const moduloEnviosCreados = {
                 .delete()
                 .eq('id_envio', envio.id_envio);
 
-            // Desuscribirse de Realtime
+            // Detener timer
+            moduloEnviosCreados.detenerTimer();
+
+            // Desuscribirse de Realtime RRHH
             if (moduloEnviosCreados.realtimeChannel) {
-                supabase.removeChannel(moduloEnviosCreados.realtimeChannel);
+                supabaseRRHH.removeChannel(moduloEnviosCreados.realtimeChannel);
                 moduloEnviosCreados.realtimeChannel = null;
             }
 
@@ -2822,6 +2912,7 @@ export const moduloEnviosCreados = {
             moduloEnviosCreados.preparacionActiva = null;
             moduloEnviosCreados.productosPreparacion = [];
             moduloEnviosCreados.ultimoSkuFoco = null;
+            moduloEnviosCreados.tiempoInicioPrep = null;
 
             // Volver a la lista
             const contenedor = document.getElementById('app-content');
