@@ -85,7 +85,7 @@ async function cargarDatosMaestrosPreparacion() {
             // Colaboradores activos de RRHH
             supabaseRRHH.from('colaboradores')
                 .select('id, nombre')
-                .eq('activo', true)
+                .eq('estado', 'Activo')
                 .order('nombre'),
 
             // Tareas con etapa ENVIO de Producción
@@ -1010,6 +1010,8 @@ export const moduloEnviosCreados = {
     cambiarEstado: async (idEnvio, nuevoEstado) => {
         try {
             const tabla = usandoTablasNuevas ? 'registro_envios' : 'registro_envios_full';
+            const tablaDetalles = usandoTablasNuevas ? 'detalle_envios' : 'detalle_envios_full';
+
             const { error } = await supabase
                 .from(tabla)
                 .update({ estado: nuevoEstado })
@@ -1024,6 +1026,48 @@ export const moduloEnviosCreados = {
             // Sincronizar con RRHH si cambia a "En Preparación"
             if (nuevoEstado === 'En Preparación' && envio) {
                 await sincronizarConRRHH(envio, 'crear');
+            }
+
+            // ============================================
+            // DESCONTAR STOCK SI CAMBIA A "DESPACHADO"
+            // ============================================
+            if (nuevoEstado === 'Despachado' && envio) {
+                try {
+                    // Obtener detalles del envío
+                    const { data: detalles } = await supabase
+                        .from(tablaDetalles)
+                        .select('sku, cantidad_enviada')
+                        .eq('id_envio', idEnvio);
+
+                    if (detalles && detalles.length > 0) {
+                        const tipoEnvio = envio.id_destino === 'FULL' ? 'FULL' : '3PL';
+                        const detallesStock = detalles
+                            .filter(d => d.cantidad_enviada > 0)
+                            .map(d => ({ sku: d.sku, cantidad: d.cantidad_enviada }));
+
+                        console.log(`📦 Descontando stock (${tipoEnvio}) desde cambio de estado:`, detallesStock);
+
+                        const { data: resStock, error: errStock } = await supabaseProduccion.rpc(
+                            'rpc_registrar_salida_envio_meli',
+                            {
+                                p_id_envio: idEnvio,
+                                p_tipo_envio: tipoEnvio,
+                                p_detalles: detallesStock,
+                                p_usuario: 'meli-full-3pl'
+                            }
+                        );
+
+                        if (errStock) {
+                            console.error('❌ Error descuento stock:', errStock);
+                        } else if (resStock?.ya_procesado) {
+                            console.log('ℹ️ Envío ya procesado en stock');
+                        } else {
+                            console.log('✅ Stock descontado:', resStock);
+                        }
+                    }
+                } catch (stockError) {
+                    console.error('❌ Error en descuento de stock:', stockError);
+                }
             }
 
             mostrarNotificacion(`Estado actualizado a "${nuevoEstado}"`, 'success');
@@ -2825,6 +2869,54 @@ export const moduloEnviosCreados = {
                 .eq('id_envio', envio.id_envio);
 
             if (error) throw error;
+
+            // ============================================
+            // DESCONTAR STOCK EN PRODUCCIONTEXTILAPP
+            // ============================================
+            try {
+                // Determinar tipo de envío (FULL o 3PL)
+                const tipoEnvio = envio.id_destino === 'FULL' ? 'FULL' : '3PL';
+
+                // Preparar detalles para el RPC
+                const detallesStock = moduloEnviosCreados.productosPreparacion
+                    .filter(p => p.cantidad_enviada > 0)
+                    .map(p => ({
+                        sku: p.sku,
+                        cantidad: p.cantidad_enviada
+                    }));
+
+                if (detallesStock.length > 0) {
+                    console.log(`📦 Descontando stock (${tipoEnvio}):`, detallesStock);
+
+                    const { data: resStock, error: errStock } = await supabaseProduccion.rpc(
+                        'rpc_registrar_salida_envio_meli',
+                        {
+                            p_id_envio: envio.id_envio,
+                            p_tipo_envio: tipoEnvio,
+                            p_detalles: detallesStock,
+                            p_usuario: 'meli-full-3pl'
+                        }
+                    );
+
+                    if (errStock) {
+                        console.error('❌ Error descuento stock:', errStock);
+                        mostrarNotificacion('Advertencia: Error al descontar stock', 'warning');
+                    } else if (resStock?.items_fallidos > 0) {
+                        console.warn('⚠️ Algunos items no se descontaron:', resStock.errores);
+                        mostrarNotificacion(
+                            `Stock: ${resStock.items_procesados} OK, ${resStock.items_fallidos} fallidos`,
+                            'warning'
+                        );
+                    } else if (resStock?.ya_procesado) {
+                        console.log('ℹ️ Envío ya procesado en stock anteriormente');
+                    } else {
+                        console.log('✅ Stock descontado:', resStock);
+                    }
+                }
+            } catch (stockError) {
+                console.error('❌ Error en descuento de stock:', stockError);
+                // No bloqueamos el flujo si falla el stock
+            }
 
             // Finalizar preparación en RRHH
             if (preparacionRRHH?.id) {

@@ -25,9 +25,9 @@ export async function cargarTransportes() {
     try {
         const { data, error } = await supabaseVentas
             .from('transportes')
-            .select('id, nombre, direccion, telefono')
+            .select('id, nombre_transporte, calle_y_numero, localidad, provincia, telefono, alias, es_sucursal, id_matriz')
             .eq('activo', true)
-            .order('nombre');
+            .order('nombre_transporte');
 
         if (error) throw error;
         transportesCache = data || [];
@@ -98,7 +98,8 @@ export async function generarRemito3PL(envio, destino, transporteId, bultosDetal
             estado: 'COMPLETADO',
             fecha_fin: new Date().toISOString(),
             consumibles_utilizados: consumibles || [],
-            cantidad_bultos: cantidadBultos
+            cantidad_bultos: cantidadBultos,
+            bultos_detalle: bultosDetalle || []
         };
 
         // Upsert: si ya existe preparación para este envío, actualizar
@@ -144,7 +145,7 @@ export async function generarRemito3PL(envio, destino, transporteId, bultosDetal
             bultos: cantidadBultos,
             valor_declarado: valorDeclarado || 0,
             notas: notas || `Envío a ${destino.nombre}`,
-            fecha_emision: new Date().toISOString(),
+            fecha_emision: new Date().toISOString().split('T')[0],
             estado: 'Despachado'
         };
 
@@ -328,7 +329,12 @@ export async function abrirModalRemito(idEnvio) {
                             </label>
                             <select id="remito-transporte" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent">
                                 <option value="">Seleccionar transporte...</option>
-                                ${transportes.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('')}
+                                ${transportes.map(t => {
+                                    const sucursalTag = t.es_sucursal ? ' (Suc.)' : '';
+                                    const ubicacion = [t.localidad, t.provincia].filter(Boolean).join(', ');
+                                    const label = ubicacion ? `${t.nombre_transporte}${sucursalTag} — ${ubicacion}` : `${t.nombre_transporte}${sucursalTag}`;
+                                    return `<option value="${t.id}">${label}</option>`;
+                                }).join('')}
                             </select>
                         </div>
 
