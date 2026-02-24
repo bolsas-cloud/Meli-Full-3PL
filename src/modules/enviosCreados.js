@@ -1846,10 +1846,40 @@ export const moduloEnviosCreados = {
             }
         }
 
-        // Construir array con inventory_id y cantidad escaneada
+        // Obtener stock y ubicaciones de ProduccionTextilApp
+        let stockMap = {};
+        let ubicacionesMap = {};
+
+        if (skusEnvio.length > 0) {
+            try {
+                const [stockRes, ubiRes] = await Promise.all([
+                    supabaseProduccion
+                        .from('productos')
+                        .select('sku, stock_actual')
+                        .in('sku', skusEnvio),
+                    supabaseProduccion
+                        .from('v_productos_ubicaciones')
+                        .select('sku, ubicaciones')
+                        .in('sku', skusEnvio)
+                ]);
+
+                if (stockRes.data) {
+                    stockRes.data.forEach(p => stockMap[p.sku] = p.stock_actual ?? null);
+                }
+                if (ubiRes.data) {
+                    ubiRes.data.forEach(p => ubicacionesMap[p.sku] = p.ubicaciones || '');
+                }
+            } catch (err) {
+                console.warn('⚠️ No se pudo obtener stock/ubicaciones de Producción:', err);
+            }
+        }
+
+        // Construir array con inventory_id, stock, ubicaciones y cantidad escaneada
         const productosConInventory = envio.productos.map(prod => ({
             ...prod,
             inventory_id: inventoryMap[prod.sku] || null,
+            stock_actual: stockMap[prod.sku] ?? null,
+            ubicaciones: ubicacionesMap[prod.sku] || '',
             cantidad_escaneada: progresoMap[prod.sku] || 0
         }));
 
@@ -2018,6 +2048,8 @@ export const moduloEnviosCreados = {
                         <thead class="bg-gray-50 border-b border-gray-200">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-auto">SKU / Título</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Ubicación</th>
+                                <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16">Stock</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-28">Inventory ID</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20">A Enviar</th>
                                 <th class="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Escaneados</th>
@@ -2296,6 +2328,11 @@ export const moduloEnviosCreados = {
                 estadoTexto = 'En Progreso';
             }
 
+            const stockVal = p.stock_actual;
+            const stockTexto = stockVal !== null && stockVal !== undefined ? stockVal : '-';
+            const stockInsuficiente = stockVal !== null && stockVal !== undefined && stockVal < requeridos;
+            const ubiTexto = p.ubicaciones || '-';
+
             return `
                 <tr class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                     data-idx="${idx}"
@@ -2304,6 +2341,10 @@ export const moduloEnviosCreados = {
                         <div class="font-medium text-gray-800">${p.sku || '-'}</div>
                         <div class="text-xs text-gray-500 truncate" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
+                    <td class="px-4 py-3 text-center text-xs text-gray-600 w-24" title="${ubiTexto}">
+                        ${ubiTexto !== '-' ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono font-medium">${ubiTexto}</span>` : '<span class="text-gray-400">-</span>'}
+                    </td>
+                    <td class="px-4 py-3 text-center font-bold w-16 ${stockInsuficiente ? 'text-red-600' : 'text-gray-800'}">${stockTexto}</td>
                     <td class="px-4 py-3 text-center text-sm font-mono text-gray-600 w-28">${p.inventory_id || '-'}</td>
                     <td class="px-4 py-3 text-center font-bold text-gray-800 w-20">${requeridos}</td>
                     <td class="px-4 py-3 text-center font-bold text-lg w-24 ${escaneados >= requeridos ? 'text-green-600' : 'text-gray-800'}">${escaneados}</td>
