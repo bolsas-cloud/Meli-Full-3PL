@@ -954,6 +954,7 @@ export const moduloPrecios = {
                 supabase
                     .from('publicaciones_meli')
                     .select('sku, id_publicacion, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, estado, tipo_logistica, peso_gr, tiene_envio_gratis')
+                    .not('sku', 'is', null)
                     .in('estado', ['active', 'paused']) // Solo activas y pausadas, no cerradas
                     .order('titulo'),
                 supabase

@@ -234,6 +234,7 @@ export const moduloStock = {
             const { data, error } = await supabase
                 .from('publicaciones_meli')
                 .select('id_publicacion, sku, titulo, precio, stock_full, stock_deposito, stock_transito, tipo_logistica, tiene_flex, estado, user_product_id')
+                .not('sku', 'is', null)
                 .order('titulo');
 
             if (error) throw error;
@@ -588,7 +589,7 @@ export const moduloStock = {
 <title>Stock Valorizado - ${fecha}</title>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #333; padding: 20px; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; color: #333; padding: 20px; }
     .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 2px solid #1a56db; padding-bottom: 12px; }
     .header h1 { font-size: 18px; color: #1a56db; }
     .header .fecha { font-size: 11px; color: #666; text-align: right; }
@@ -600,7 +601,7 @@ export const moduloStock = {
     th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
     td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
     tr:nth-child(even) { background: #f8fafc; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .total-row { background: #1a56db !important; color: white; font-weight: 700; }
     .total-row td { border: none; padding: 8px; }
     .titulo { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -666,9 +667,12 @@ export const moduloStock = {
     </tbody>
 </table>
 <p class="nota">* Valor estimado de posible ingreso neto. Precio Neto = Precio publicado en ML dividido 1.21 (sin IVA). No incluye comisiones ML ni costos de envío.</p>
+<div class="no-print" style="margin-top:16px; text-align:center;">
+    <button onclick="window.print()" style="padding:8px 24px; background:#1a56db; color:white; border:none; border-radius:6px; font-size:13px; cursor:pointer;">Imprimir / Guardar PDF</button>
+</div>
+<style>@media print { .no-print { display: none !important; } }</style>
 </body></html>`);
         ventana.document.close();
-        setTimeout(() => ventana.print(), 300);
     },
 
     sincronizar: async () => {
