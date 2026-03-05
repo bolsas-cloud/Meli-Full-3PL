@@ -233,7 +233,7 @@ export const moduloStock = {
         try {
             const { data, error } = await supabase
                 .from('publicaciones_meli')
-                .select('id_publicacion, sku, titulo, precio, stock_full, stock_deposito, stock_transito, tipo_logistica, tiene_flex, estado, user_product_id')
+                .select('id_publicacion, sku, titulo, precio, comision_ml, cargo_fijo_ml, impuestos_estimados, neto_estimado, stock_full, stock_deposito, stock_transito, tipo_logistica, tiene_flex, estado, user_product_id')
                 .not('sku', 'is', null)
                 .order('titulo');
 
@@ -570,7 +570,13 @@ export const moduloStock = {
             const stockTransito = parseInt(p.stock_transito) || 0;
             const stockTotal = stockFull + stockDeposito;
             const precioML = parseFloat(p.precio) || 0;
-            const precioNeto = precioML / 1.21;
+            const comision = parseFloat(p.comision_ml) || 0;
+            const cargoFijo = parseFloat(p.cargo_fijo_ml) || 0;
+            const impuestos = parseFloat(p.impuestos_estimados) || 0;
+            // Neto = precio - comisión - cargo fijo - impuestos (mismo cálculo que módulo Precios)
+            const precioNeto = (parseFloat(p.neto_estimado) || 0) > 0
+                ? parseFloat(p.neto_estimado)
+                : precioML - comision - cargoFijo - impuestos;
             const valorNeto = precioNeto * stockTotal;
             return { ...p, stockFull, stockDeposito, stockTransito, stockTotal, precioML, precioNeto, valorNeto };
         }).sort((a, b) => b.valorNeto - a.valorNeto);
@@ -612,7 +618,7 @@ export const moduloStock = {
 <div class="header">
     <div>
         <h1>Stock Valorizado - Mercado Libre</h1>
-        <p style="color:#64748b; margin-top:4px;">Precio Neto = Precio ML / 1.21 (sin IVA 21%)</p>
+        <p style="color:#64748b; margin-top:4px;">Neto = Precio ML - Comisión ML - Cargo Fijo - Impuestos</p>
     </div>
     <div class="fecha">${fecha}</div>
 </div>
@@ -640,7 +646,7 @@ export const moduloStock = {
             <th class="num">Tránsito</th>
             <th class="num">Total</th>
             <th class="num">Precio ML</th>
-            <th class="num">Neto s/IVA</th>
+            <th class="num">Neto ML</th>
             <th class="num">Valor Neto Stock</th>
         </tr>
     </thead>
@@ -666,7 +672,7 @@ export const moduloStock = {
         </tr>
     </tbody>
 </table>
-<p class="nota">* Valor estimado de posible ingreso neto. Precio Neto = Precio publicado en ML dividido 1.21 (sin IVA). No incluye comisiones ML ni costos de envío.</p>
+<p class="nota">* Valor estimado de posible ingreso neto. Neto ML = Precio - Comisión - Cargo Fijo - Impuestos. No incluye costo de envío gratis ni costos operativos propios.</p>
 <div class="no-print" style="margin-top:16px; text-align:center;">
     <button onclick="window.print()" style="padding:8px 24px; background:#1a56db; color:white; border:none; border-radius:6px; font-size:13px; cursor:pointer;">Imprimir / Guardar PDF</button>
 </div>
