@@ -114,6 +114,15 @@ Al terminar modificaciones en cualquier proyecto del ecosistema, **ofrecer commi
 
 All code identifiers, UI text, variable names, and comments are in **Spanish**.
 
-## Version
+## Versionado
 
-Currently v1.7.0.
+La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="text-white/50">vX.Y.Z</span>`.
+
+**Regla obligatoria:** Al hacer commit de cambios funcionales (features, fixes, mejoras), **siempre incrementar la versión** en el sidebar:
+- **Patch** (v1.8.0 → v1.8.1): bug fixes menores
+- **Minor** (v1.8.0 → v1.9.0): nueva funcionalidad o mejora significativa
+- **Major** (v1.8.0 → v2.0.0): cambios breaking o reestructuración mayor
+
+No incrementar para cambios puramente cosméticos, docs, o configuración.
+
+Currently v1.8.0.
