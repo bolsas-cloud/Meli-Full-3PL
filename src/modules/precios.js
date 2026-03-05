@@ -281,6 +281,11 @@ export const moduloPrecios = {
 
         `;
 
+        // Resetear filtros al entrar a la vista
+        filtros.busqueda = '';
+        filtros.estado = 'todos';
+        filtros.fallos = false;
+
         // Configurar eventos
         document.getElementById('buscar-producto')?.addEventListener('input', (e) => {
             filtros.busqueda = e.target.value.toLowerCase();

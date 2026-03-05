@@ -119,6 +119,13 @@ export const moduloStock = {
                                 Guardar Cambios
                             </button>
 
+                            <!-- Botón PDF Valorizado -->
+                            <button onclick="moduloStock.generarPDFValorizado()"
+                                    class="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-2">
+                                <i class="fas fa-file-pdf"></i>
+                                PDF Valorizado
+                            </button>
+
                             <!-- Botón Sincronizar -->
                             <button onclick="moduloStock.sincronizar()" id="btn-sync-stock"
                                     class="bg-brand text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand/90 transition-colors flex items-center gap-2">
@@ -191,6 +198,11 @@ export const moduloStock = {
             </div>
         `;
 
+        // Resetear filtros al entrar a la vista
+        filtros.busqueda = '';
+        filtros.logistica = 'todos';
+        filtros.estado = 'todos';
+
         // Configurar eventos
         document.getElementById('buscar-stock').addEventListener('input', (e) => {
             filtros.busqueda = e.target.value.toLowerCase();
@@ -221,7 +233,7 @@ export const moduloStock = {
         try {
             const { data, error } = await supabase
                 .from('publicaciones_meli')
-                .select('id_publicacion, sku, titulo, stock_full, stock_deposito, stock_transito, tipo_logistica, tiene_flex, estado, user_product_id')
+                .select('id_publicacion, sku, titulo, precio, stock_full, stock_deposito, stock_transito, tipo_logistica, tiene_flex, estado, user_product_id')
                 .order('titulo');
 
             if (error) throw error;
@@ -535,6 +547,130 @@ export const moduloStock = {
     // ============================================
     // SINCRONIZAR: Actualiza stock desde ML
     // ============================================
+    // ============================================
+    // PDF VALORIZADO: Genera reporte de stock con valor neto
+    // ============================================
+    generarPDFValorizado: () => {
+        // Filtrar productos con stock > 0 y precio
+        const productosConStock = productos.filter(p => {
+            const stockTotal = (parseInt(p.stock_full) || 0) + (parseInt(p.stock_deposito) || 0);
+            return stockTotal > 0 && (parseFloat(p.precio) || 0) > 0;
+        });
+
+        if (productosConStock.length === 0) {
+            mostrarNotificacion('No hay productos con stock y precio para valorizar', 'warning');
+            return;
+        }
+
+        // Calcular valores
+        const lineas = productosConStock.map(p => {
+            const stockFull = parseInt(p.stock_full) || 0;
+            const stockDeposito = parseInt(p.stock_deposito) || 0;
+            const stockTransito = parseInt(p.stock_transito) || 0;
+            const stockTotal = stockFull + stockDeposito;
+            const precioML = parseFloat(p.precio) || 0;
+            const precioNeto = precioML / 1.21;
+            const valorNeto = precioNeto * stockTotal;
+            return { ...p, stockFull, stockDeposito, stockTransito, stockTotal, precioML, precioNeto, valorNeto };
+        }).sort((a, b) => b.valorNeto - a.valorNeto);
+
+        const totalValor = lineas.reduce((sum, l) => sum + l.valorNeto, 0);
+        const totalUnidades = lineas.reduce((sum, l) => sum + l.stockTotal, 0);
+        const totalTransito = lineas.reduce((sum, l) => sum + l.stockTransito, 0);
+
+        const fmt = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtInt = (n) => n.toLocaleString('es-AR');
+        const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+        const ventana = window.open('', '_blank');
+        ventana.document.write(`<!DOCTYPE html>
+<html><head>
+<title>Stock Valorizado - ${fecha}</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #333; padding: 20px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 2px solid #1a56db; padding-bottom: 12px; }
+    .header h1 { font-size: 18px; color: #1a56db; }
+    .header .fecha { font-size: 11px; color: #666; text-align: right; }
+    .kpis { display: flex; gap: 20px; margin-bottom: 16px; }
+    .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 16px; }
+    .kpi .label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi .value { font-size: 16px; font-weight: 700; color: #1e293b; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; }
+    td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .total-row { background: #1a56db !important; color: white; font-weight: 700; }
+    .total-row td { border: none; padding: 8px; }
+    .titulo { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nota { margin-top: 12px; font-size: 10px; color: #94a3b8; }
+    @media print { body { padding: 10px; } }
+</style>
+</head><body>
+<div class="header">
+    <div>
+        <h1>Stock Valorizado - Mercado Libre</h1>
+        <p style="color:#64748b; margin-top:4px;">Precio Neto = Precio ML / 1.21 (sin IVA 21%)</p>
+    </div>
+    <div class="fecha">${fecha}</div>
+</div>
+<div class="kpis">
+    <div class="kpi">
+        <div class="label">Productos</div>
+        <div class="value">${lineas.length}</div>
+    </div>
+    <div class="kpi">
+        <div class="label">Unidades Totales</div>
+        <div class="value">${fmtInt(totalUnidades)}</div>
+    </div>
+    <div class="kpi">
+        <div class="label">Valor Neto Total</div>
+        <div class="value" style="color:#16a34a">$ ${fmt(totalValor)}</div>
+    </div>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>SKU</th>
+            <th>Producto</th>
+            <th class="num">Full</th>
+            <th class="num">Depósito</th>
+            <th class="num">Tránsito</th>
+            <th class="num">Total</th>
+            <th class="num">Precio ML</th>
+            <th class="num">Neto s/IVA</th>
+            <th class="num">Valor Neto Stock</th>
+        </tr>
+    </thead>
+    <tbody>
+        ${lineas.map(l => `
+        <tr>
+            <td style="font-family:monospace; font-size:10px;">${l.sku || '-'}</td>
+            <td class="titulo" title="${(l.titulo || '').replace(/"/g, '&quot;')}">${l.titulo || '-'}</td>
+            <td class="num">${fmtInt(l.stockFull)}</td>
+            <td class="num">${fmtInt(l.stockDeposito)}</td>
+            <td class="num">${l.stockTransito > 0 ? fmtInt(l.stockTransito) : '-'}</td>
+            <td class="num" style="font-weight:600">${fmtInt(l.stockTotal)}</td>
+            <td class="num">$ ${fmt(l.precioML)}</td>
+            <td class="num">$ ${fmt(l.precioNeto)}</td>
+            <td class="num" style="font-weight:600">$ ${fmt(l.valorNeto)}</td>
+        </tr>`).join('')}
+        <tr class="total-row">
+            <td colspan="4" style="text-align:right">TOTAL</td>
+            <td class="num">${fmtInt(totalTransito)}</td>
+            <td class="num">${fmtInt(totalUnidades)}</td>
+            <td colspan="2"></td>
+            <td class="num">$ ${fmt(totalValor)}</td>
+        </tr>
+    </tbody>
+</table>
+<p class="nota">* Valor estimado de posible ingreso neto. Precio Neto = Precio publicado en ML dividido 1.21 (sin IVA). No incluye comisiones ML ni costos de envío.</p>
+</body></html>`);
+        ventana.document.close();
+        setTimeout(() => ventana.print(), 300);
+    },
+
     sincronizar: async () => {
         const btn = document.getElementById('btn-sync-stock');
         const icon = document.getElementById('sync-icon-stock');
