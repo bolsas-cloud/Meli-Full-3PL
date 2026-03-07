@@ -1662,7 +1662,9 @@ async function syncBilling(supabase: any, accessToken: string) {
 // ============================================
 async function syncAdsDetailed(supabase: any, accessToken: string) {
   try {
-    // PASO 1: Obtener Advertiser ID (reutilizar lógica existente)
+    const SITE_ID = 'MLA'
+
+    // PASO 1: Obtener Advertiser ID
     const { data: cachedAdvertiser } = await supabase
       .from('config_meli')
       .select('valor')
@@ -1697,130 +1699,136 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       }
     }
 
-    // PASO 2: Determinar rango de fechas (incremental)
+    // PASO 2: Determinar rango de fechas (incremental, máx 90 días)
     const hoy = new Date()
     let fechaDesde: Date
 
     const { data: ultimaMetrica } = await supabase
       .from('ads_metricas_diarias')
       .select('fecha')
+      .not('item_id', 'is', null)
       .order('fecha', { ascending: false })
       .limit(1)
       .single()
 
     if (ultimaMetrica?.fecha) {
       fechaDesde = new Date(ultimaMetrica.fecha)
-      fechaDesde.setDate(fechaDesde.getDate() - 5) // 5 días de margen
+      fechaDesde.setDate(fechaDesde.getDate() - 3) // 3 días de margen por delay ML
     } else {
       fechaDesde = new Date()
-      fechaDesde.setDate(hoy.getDate() - 89) // máx 90 días
+      fechaDesde.setDate(hoy.getDate() - 89)
     }
 
     const dateFrom = fechaDesde.toISOString().split('T')[0]
     const dateTo = hoy.toISOString().split('T')[0]
 
-    // PASO 3: Obtener campañas
-    const campaignsUrl = `${ML_API_BASE}/advertising/advertisers/${advertiserId}/product_ads/campaigns`
-    const campaignsResponse = await fetch(campaignsUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
-    })
+    const metricsFields = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,direct_items_quantity,indirect_items_quantity,units_quantity'
+    const apiHeaders = { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
 
-    if (!campaignsResponse.ok) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No se pudieron obtener campañas' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const campaignsData = await campaignsResponse.json()
-    const campaigns = campaignsData.results || []
-
-    // Guardar campañas
+    // PASO 3: Obtener campañas con métricas (endpoint v2: campaigns/search)
     let campanasGuardadas = 0
-    for (const camp of campaigns) {
-      const { error } = await supabase.from('ads_campanas').upsert({
-        campaign_id: String(camp.campaign_id),
-        nombre: camp.name || camp.title || `Campaña ${camp.campaign_id}`,
-        status: camp.status || 'unknown',
-        tipo: camp.type || 'automatic',
-        presupuesto_diario: parseFloat(camp.daily_budget || 0),
-        fecha_creacion: camp.date_created || null,
-        fecha_sync: new Date().toISOString()
-      }, { onConflict: 'campaign_id' })
+    let offset = 0
+    const allCampaigns: any[] = []
 
-      if (!error) campanasGuardadas++
+    while (true) {
+      const campUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=50&offset=${offset}&date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}`
+      const campResp = await fetch(campUrl, { headers: apiHeaders })
+
+      if (!campResp.ok) {
+        const errText = await campResp.text()
+        console.error(`Campaigns error (${campResp.status}): ${errText}`)
+        break
+      }
+
+      const campData = await campResp.json()
+      const results = campData.results || []
+      allCampaigns.push(...results)
+
+      for (const camp of results) {
+        const { error } = await supabase.from('ads_campanas').upsert({
+          campaign_id: String(camp.id),
+          nombre: camp.name || `Campaña ${camp.id}`,
+          status: camp.status || 'unknown',
+          tipo: camp.type || 'automatic',
+          presupuesto_diario: parseFloat(camp.budget || camp.daily_budget || 0),
+          fecha_creacion: camp.date_created || null,
+          fecha_sync: new Date().toISOString()
+        }, { onConflict: 'campaign_id' })
+
+        if (!error) campanasGuardadas++
+      }
+
+      if (results.length < 50) break
+      offset += 50
     }
 
-    // PASO 4: Obtener métricas diarias por item
-    const metricsFields = 'clicks,prints,ctr,cost,cpc,acos,roas,cvr,direct_units_quantity,direct_amount,indirect_units_quantity,indirect_amount,units_quantity,total_amount,organic_units_quantity,organic_units_amount'
+    // PASO 4: Obtener métricas por item (endpoint v2: ads/search)
+    // Obtener mapa SKU
+    const { data: pubsData } = await supabase
+      .from('publicaciones_meli')
+      .select('id_publicacion, sku')
+      .not('sku', 'is', null)
 
-    const metricsUrl = `${ML_API_BASE}/advertising/advertisers/${advertiserId}/product_ads/campaigns?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}&aggregation_type=DAILY`
-
-    const metricsResponse = await fetch(metricsUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
-    })
+    const skuMap: { [key: string]: string } = {}
+    if (pubsData) {
+      for (const p of pubsData) {
+        skuMap[p.id_publicacion] = p.sku
+      }
+    }
 
     let metricasGuardadas = 0
+    offset = 0
 
-    if (metricsResponse.ok) {
-      const metricsData = await metricsResponse.json()
-      const results = metricsData.results || []
+    while (true) {
+      const adsUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/ads/search?limit=50&offset=${offset}&date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}`
+      const adsResp = await fetch(adsUrl, { headers: apiHeaders })
 
-      // Obtener mapa SKU desde publicaciones_meli
-      const { data: pubsData } = await supabase
-        .from('publicaciones_meli')
-        .select('id_publicacion, sku')
-        .not('sku', 'is', null)
-
-      const skuMap: { [key: string]: string } = {}
-      if (pubsData) {
-        for (const p of pubsData) {
-          skuMap[p.id_publicacion] = p.sku
-        }
+      if (!adsResp.ok) {
+        const errText = await adsResp.text()
+        console.error(`Ads search error (${adsResp.status}): ${errText}`)
+        break
       }
 
-      // Procesar resultados diarios
-      for (const dia of results) {
-        const fecha = dia.date
-        if (!fecha) continue
+      const adsData = await adsResp.json()
+      const items = adsData.results || []
 
-        // Si los datos vienen agrupados por campaña, iterar items dentro
-        const items = dia.items || dia.ads || [dia]
+      for (const item of items) {
+        const itemId = item.item_id || null
+        if (!itemId) continue
 
-        for (const item of items) {
-          const itemId = item.item_id || item.id || null
-          if (!itemId && !item.cost) continue
-
-          const registro = {
-            fecha,
-            campaign_id: item.campaign_id ? String(item.campaign_id) : null,
-            item_id: itemId,
-            sku: itemId ? (skuMap[itemId] || null) : null,
-            impresiones: parseInt(item.prints || item.impressions || 0),
-            clicks: parseInt(item.clicks || 0),
-            ctr: parseFloat(item.ctr || 0),
-            costo: parseFloat(item.cost || 0),
-            cpc: parseFloat(item.cpc || 0),
-            ventas_directas_unidades: parseInt(item.direct_units_quantity || 0),
-            ventas_directas_monto: parseFloat(item.direct_amount || 0),
-            ventas_indirectas_unidades: parseInt(item.indirect_units_quantity || 0),
-            ventas_indirectas_monto: parseFloat(item.indirect_amount || 0),
-            ventas_total_unidades: parseInt(item.units_quantity || 0),
-            ventas_total_monto: parseFloat(item.total_amount || 0),
-            ventas_organicas_unidades: parseInt(item.organic_units_quantity || 0),
-            ventas_organicas_monto: parseFloat(item.organic_units_amount || 0),
-            acos: parseFloat(item.acos || 0),
-            roas: parseFloat(item.roas || 0),
-            cvr: parseFloat(item.cvr || 0)
-          }
-
-          const { error } = await supabase
-            .from('ads_metricas_diarias')
-            .upsert(registro, { onConflict: 'fecha,item_id' })
-
-          if (!error) metricasGuardadas++
+        const m = item.metrics || {}
+        const registro = {
+          fecha: dateTo, // resumen del periodo
+          campaign_id: item.campaign_id ? String(item.campaign_id) : null,
+          item_id: itemId,
+          sku: skuMap[itemId] || null,
+          impresiones: parseInt(m.prints || 0),
+          clicks: parseInt(m.clicks || 0),
+          ctr: m.prints > 0 ? (parseInt(m.clicks || 0) / parseInt(m.prints || 1)) * 100 : 0,
+          costo: parseFloat(m.cost || 0),
+          cpc: parseFloat(m.cpc || 0),
+          ventas_directas_unidades: parseInt(m.direct_items_quantity || 0),
+          ventas_directas_monto: parseFloat(m.direct_amount || 0),
+          ventas_indirectas_unidades: parseInt(m.indirect_items_quantity || 0),
+          ventas_indirectas_monto: parseFloat(m.indirect_amount || 0),
+          ventas_total_unidades: parseInt(m.units_quantity || 0),
+          ventas_total_monto: parseFloat(m.total_amount || 0),
+          ventas_organicas_unidades: 0,
+          ventas_organicas_monto: 0,
+          acos: parseFloat(m.acos || 0),
+          roas: parseFloat(m.roas || 0),
+          cvr: parseFloat(m.cvr || 0)
         }
+
+        const { error } = await supabase
+          .from('ads_metricas_diarias')
+          .upsert(registro, { onConflict: 'fecha,item_id' })
+
+        if (!error) metricasGuardadas++
       }
+
+      if (items.length < 50) break
+      offset += 50
     }
 
     return new Response(
@@ -1828,6 +1836,7 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
         success: true,
         campanas: campanasGuardadas,
         metricas: metricasGuardadas,
+        total_campanas: allCampaigns.length,
         fechaDesde: dateFrom,
         fechaHasta: dateTo
       }),
