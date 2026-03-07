@@ -289,8 +289,8 @@ export const moduloBilling = {
             chartInstance = null;
         }
 
-        // Ultimos 6 periodos (mas antiguo primero)
-        const ultimos = [...periodos].reverse().slice(-6);
+        // Ultimos 6 periodos (mas nuevo primero, izquierda a derecha)
+        const ultimos = [...periodos].slice(0, 6);
         const labels = ultimos.map(p => {
             const mesNombre = new Date(p.anio, (p.mes || 1) - 1).toLocaleString('es-AR', { month: 'short' });
             return `${mesNombre} ${p.anio}`;
@@ -298,7 +298,7 @@ export const moduloBilling = {
 
         const datasets = [
             { label: 'Comisiones', data: ultimos.map(p => Math.abs(p.total_comisiones || 0)), backgroundColor: 'rgba(59, 130, 246, 0.8)' },
-            { label: 'Cargos Fijos', data: ultimos.map(p => Math.abs(p.total_cargos_fijos || 0)), backgroundColor: 'rgba(245, 158, 11, 0.8)' },
+            { label: 'Logística Full', data: ultimos.map(p => Math.abs(p.total_cargos_fijos || 0)), backgroundColor: 'rgba(245, 158, 11, 0.8)' },
             { label: 'Envios', data: ultimos.map(p => Math.abs(p.total_envios || 0)), backgroundColor: 'rgba(249, 115, 22, 0.8)' },
             { label: 'Publicidad', data: ultimos.map(p => Math.abs(p.total_publicidad || 0)), backgroundColor: 'rgba(139, 92, 246, 0.8)' },
             { label: 'Impuestos', data: ultimos.map(p => Math.abs(p.total_impuestos || 0)), backgroundColor: 'rgba(239, 68, 68, 0.8)' },
@@ -344,8 +344,8 @@ export const moduloBilling = {
             if (error) throw error;
 
             if (data?.success) {
-                mostrarNotificacion(`Billing sincronizado: ${data.periodos} periodos, ${data.detalles} registros`, 'success');
-                console.log('Billing sync response:', JSON.stringify(data, null, 2));
+                const skipMsg = data.skipped ? ` (${data.skipped} sin cambios)` : '';
+                mostrarNotificacion(`Billing sincronizado: ${data.periodos} periodos, ${data.detalles} registros${skipMsg}`, 'success');
                 await moduloBilling.cargarDatos();
             } else {
                 mostrarNotificacion(data?.error || 'Error al sincronizar billing', 'error');

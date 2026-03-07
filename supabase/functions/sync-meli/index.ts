@@ -1453,6 +1453,18 @@ async function syncBilling(supabase: any, accessToken: string) {
     let detallesInsertados = 0
 
     const debugInfo: any[] = []
+    let periodosSkipped = 0
+
+    // Obtener periodos ya guardados con detalle (para sync incremental)
+    const { data: periodosExistentes } = await supabase
+      .from('billing_periodos')
+      .select('periodo_key, total_comisiones')
+
+    const periodosConDetalle = new Set(
+      (periodosExistentes || [])
+        .filter((p: any) => parseFloat(p.total_comisiones || 0) !== 0)
+        .map((p: any) => p.periodo_key)
+    )
 
     // PASO 2: Para cada periodo, obtener summary/details para desglose de cargos
     for (const periodo of periodos) {
@@ -1463,6 +1475,13 @@ async function syncBilling(supabase: any, accessToken: string) {
       const keyParts = key.split('-')
       const anio = keyParts.length >= 2 ? parseInt(keyParts[0]) : null
       const mes = keyParts.length >= 2 ? parseInt(keyParts[1]) : null
+
+      // Sync incremental: skip periodos cerrados que ya tienen detalle
+      const periodoAbierto = fechaVenc === '9999-12-31' || !fechaVenc
+      if (!periodoAbierto && periodosConDetalle.has(key)) {
+        periodosSkipped++
+        continue
+      }
 
       // El monto total ya viene en el periodo
       const totalPeriodo = parseFloat(periodo.amount || periodo.total || 0)
@@ -1621,8 +1640,8 @@ async function syncBilling(supabase: any, accessToken: string) {
         success: true,
         periodos: periodosActualizados,
         detalles: detallesInsertados,
-        total_periodos_api: periodos.length,
-        debug: debugInfo
+        skipped: periodosSkipped,
+        total_periodos_api: periodos.length
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
