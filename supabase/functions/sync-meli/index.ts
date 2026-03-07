@@ -1777,6 +1777,9 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       }
     }
 
+    // Borrar items anteriores (se reemplazan con datos frescos del rango completo)
+    await supabase.from('ads_metricas_diarias').delete().not('item_id', 'like', '_CAMP_%')
+
     let metricasItems = 0
     offset = 0
 
@@ -1795,7 +1798,7 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
 
         const m = item.metrics || {}
         const registro = {
-          fecha: dateFrom, // fecha inicio del rango como referencia
+          fecha: dateTo, // fecha del sync como referencia
           campaign_id: item.campaign_id ? String(item.campaign_id) : null,
           item_id: itemId,
           sku: skuMap[itemId] || null,

@@ -55,6 +55,7 @@ export const moduloAds = {
                 </div>
 
                 <!-- KPI Cards -->
+                <p class="text-xs text-gray-400" id="ads-kpi-rango"></p>
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <span class="text-xs font-medium text-gray-500">Gasto Total</span>
@@ -208,6 +209,12 @@ export const moduloAds = {
             // Calcular KPIs con items, gráficos con costos diarios
             moduloAds.calcularKPIs(itemsFiltrados);
             moduloAds.calcularResumenProductos(itemsFiltrados);
+            // Mostrar rango de datos
+            const rangoEl = document.getElementById('ads-kpi-rango');
+            if (rangoEl && itemsFiltrados.length > 0) {
+                rangoEl.textContent = `KPIs y tabla: datos del último sync (últimos 90 días) · Gráficos: últimos ${filtros.dias} días`;
+            }
+
             moduloAds.renderGraficos(costosDiarios);
             moduloAds.renderTablaProductos();
 
