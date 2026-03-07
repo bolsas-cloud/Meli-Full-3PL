@@ -111,11 +111,8 @@ export const moduloPYL = {
                 .order('anio', { ascending: false })
                 .order('mes', { ascending: false });
 
-            // Cargar ventas mensuales desde ordenes_meli
-            const { data: ordenesData } = await supabase
-                .from('ordenes_meli')
-                .select('fecha_creacion, total_lista')
-                .order('fecha_creacion', { ascending: false });
+            // Cargar ventas mensuales via RPC (evita limite de 1000 filas)
+            const { data: ventasRpc } = await supabase.rpc('rpc_ventas_mensuales');
 
             // Cargar costos publicidad diarios
             const { data: adsData } = await supabase
@@ -123,14 +120,10 @@ export const moduloPYL = {
                 .select('fecha, costo_diario')
                 .order('fecha', { ascending: false });
 
-            // Agrupar ventas por mes (usar UTC para evitar desfase de timezone)
+            // Ventas ya vienen agrupadas por mes desde el RPC
             const ventasMensuales = {};
-            (ordenesData || []).forEach(o => {
-                if (!o.fecha_creacion) return;
-                const d = new Date(o.fecha_creacion);
-                const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-                if (!ventasMensuales[key]) ventasMensuales[key] = 0;
-                ventasMensuales[key] += (parseFloat(o.total_lista) || 0);
+            (ventasRpc || []).forEach(v => {
+                ventasMensuales[v.mes_key] = parseFloat(v.ventas_brutas) || 0;
             });
 
             // Agrupar ads por mes
