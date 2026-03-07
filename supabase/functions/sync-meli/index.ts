@@ -1414,7 +1414,7 @@ async function syncBilling(supabase: any, accessToken: string) {
   try {
     // PASO 1: Obtener periodos de facturación (últimos 12 meses)
     const periodsResponse = await fetch(
-      `${ML_API_BASE}/billing/monthly/periods`,
+      `${ML_API_BASE}/billing/integration/monthly/periods?document_type=BILL&group=ML`,
       { headers: { 'Authorization': `Bearer ${accessToken}` } }
     )
 
@@ -1428,73 +1428,129 @@ async function syncBilling(supabase: any, accessToken: string) {
     }
 
     const periodsData = await periodsResponse.json()
-    const periodos = periodsData.periods || periodsData.results || periodsData || []
+    console.log('Billing periods raw response keys:', JSON.stringify(Object.keys(periodsData)))
 
-    if (!Array.isArray(periodos) || periodos.length === 0) {
+    // La API puede devolver array directamente o dentro de periods/results
+    let periodos: any[] = []
+    if (Array.isArray(periodsData)) {
+      periodos = periodsData
+    } else if (periodsData.periods) {
+      periodos = periodsData.periods
+    } else if (periodsData.results) {
+      periodos = periodsData.results
+    }
+
+    if (periodos.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, message: 'Sin periodos de facturación', raw: periodsData }),
+        JSON.stringify({ success: true, message: 'Sin periodos de facturación', raw_keys: Object.keys(periodsData) }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`Encontrados ${periodos.length} periodos de facturación`)
+    console.log(`Encontrados ${periodos.length} periodos. Primer periodo: ${JSON.stringify(periodos[0])}`)
 
     let periodosActualizados = 0
     let detallesInsertados = 0
 
-    // PASO 2: Para cada periodo, obtener summary y details
+    const debugInfo: any[] = []
+
+    // PASO 2: Para cada periodo, obtener summary/details para desglose de cargos
     for (const periodo of periodos) {
       const key = periodo.key || periodo.id || periodo.period_id
       if (!key) continue
 
       const fechaVenc = periodo.expiration_date || periodo.due_date || null
-      const mes = fechaVenc ? new Date(fechaVenc).getMonth() + 1 : null
-      const anio = fechaVenc ? new Date(fechaVenc).getFullYear() : null
+      const keyParts = key.split('-')
+      const anio = keyParts.length >= 2 ? parseInt(keyParts[0]) : null
+      const mes = keyParts.length >= 2 ? parseInt(keyParts[1]) : null
 
-      // Obtener summary
-      const summaryUrl = `${ML_API_BASE}/billing/integration/periods/key/${key}/summary?group=ML`
-      const summaryResponse = await fetch(summaryUrl, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      })
+      // El monto total ya viene en el periodo
+      const totalPeriodo = parseFloat(periodo.amount || periodo.total || 0)
 
-      let summaryData: any = null
+      let rawData: any = null
       let totales = {
         comisiones: 0, cargos_fijos: 0, envios: 0,
-        publicidad: 0, impuestos: 0, reembolsos: 0, otros: 0, general: 0
+        publicidad: 0, impuestos: 0, reembolsos: 0, otros: 0,
+        general: totalPeriodo
       }
 
-      if (summaryResponse.ok) {
-        summaryData = await summaryResponse.json()
+      // Intentar summary/details (desglose de charges y bonuses)
+      // Probar múltiples variantes del endpoint
+      const summaryUrls = [
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details?group=ML`,
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details`,
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary?group=ML`
+      ]
 
-        // Clasificar cargos del summary
-        const charges = summaryData.charges || summaryData.items || []
-        if (Array.isArray(charges)) {
-          for (const charge of charges) {
-            const tipo = (charge.type || charge.charge_type || '').toLowerCase()
-            const monto = parseFloat(charge.amount || charge.total || 0)
+      let summaryOk = false
+      for (const url of summaryUrls) {
+        if (summaryOk) break
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        })
+        if (resp.ok) {
+          rawData = await resp.json()
+          summaryOk = true
 
-            if (tipo.includes('comision') || tipo.includes('commission') || tipo.includes('sale_fee')) {
-              totales.comisiones += monto
-            } else if (tipo.includes('fijo') || tipo.includes('fixed') || tipo.includes('listing')) {
-              totales.cargos_fijos += monto
-            } else if (tipo.includes('envio') || tipo.includes('shipping') || tipo.includes('mercado_envios')) {
-              totales.envios += monto
-            } else if (tipo.includes('publicidad') || tipo.includes('advertising') || tipo.includes('ads')) {
-              totales.publicidad += monto
-            } else if (tipo.includes('impuesto') || tipo.includes('tax') || tipo.includes('percepcion') || tipo.includes('retencion')) {
-              totales.impuestos += monto
-            } else if (tipo.includes('reembolso') || tipo.includes('refund') || tipo.includes('credit')) {
-              totales.reembolsos += monto
-            } else {
-              totales.otros += monto
+          if (debugInfo.length === 0) {
+            debugInfo.push({ key, url, response_keys: Object.keys(rawData), sample: JSON.stringify(rawData).substring(0, 1000) })
+          }
+
+          // Parsear charges
+          const billIncludes = rawData.bill_includes || rawData
+          const charges = billIncludes.charges || rawData.charges || rawData.items || []
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const tipo = (charge.type || '').toUpperCase()
+              const label = (charge.label || charge.description || '').toLowerCase()
+              const monto = parseFloat(charge.amount || 0)
+
+              if (tipo === 'CV' || label.includes('comisi') || label.includes('sale')) {
+                totales.comisiones += monto
+              } else if (tipo === 'CXD' || label.includes('envío') || label.includes('envio') || label.includes('shipping') || label.includes('flete')) {
+                totales.envios += monto
+              } else if (tipo === 'PADS' || label.includes('publicidad') || label.includes('advertising') || label.includes('product ads')) {
+                totales.publicidad += monto
+              } else if (label.includes('impuesto') || label.includes('tax') || label.includes('percepcion') || label.includes('retencion') || label.includes('iva') || label.includes('iibb')) {
+                totales.impuestos += monto
+              } else if (label.includes('cargo fijo') || label.includes('fixed')) {
+                totales.cargos_fijos += monto
+              } else {
+                totales.otros += monto
+              }
             }
           }
-        }
 
-        totales.general = summaryData.total || (
-          totales.comisiones + totales.cargos_fijos + totales.envios +
-          totales.publicidad + totales.impuestos + totales.reembolsos + totales.otros
-        )
+          // Bonificaciones
+          const bonuses = billIncludes.bonuses || rawData.bonuses || []
+          if (Array.isArray(bonuses)) {
+            for (const bonus of bonuses) {
+              totales.reembolsos += parseFloat(bonus.amount || 0)
+            }
+          }
+
+          // Total: usar payment_collected si existe
+          const pc = rawData.payment_collected || billIncludes.payment_collected
+          if (pc?.total) totales.general = parseFloat(pc.total)
+
+        } else {
+          const errText = await resp.text()
+          if (debugInfo.length < 3) {
+            debugInfo.push({ key, url, status: resp.status, error: errText.substring(0, 300) })
+          }
+        }
+      }
+
+      // Si ningún summary funcionó, guardar solo el total del periodo
+      if (!summaryOk) {
+        // Intentar documents para tener algo de data
+        const docsUrl = `${ML_API_BASE}/billing/integration/periods/key/${key}/documents?group=ML&document_type=BILL&limit=100`
+        const docsResp = await fetch(docsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        })
+        if (docsResp.ok) {
+          rawData = await docsResp.json()
+        }
       }
 
       // Upsert periodo
@@ -1513,68 +1569,41 @@ async function syncBilling(supabase: any, accessToken: string) {
           total_reembolsos: totales.reembolsos,
           total_otros: totales.otros,
           total_general: totales.general,
-          raw_summary: summaryData
+          raw_summary: rawData
         }, { onConflict: 'periodo_key' })
 
-      if (periodoError) {
-        console.error(`Error guardando periodo ${key}:`, periodoError)
-        continue
-      }
+      if (periodoError) continue
       periodosActualizados++
 
-      // Obtener details (paginado)
-      let offset = 0
-      const limit = 500
+      // Guardar charges como billing_detalle
+      if (summaryOk && rawData) {
+        await supabase.from('billing_detalle').delete().eq('periodo_key', key)
 
-      // Limpiar detalles previos del periodo
-      await supabase.from('billing_detalle').delete().eq('periodo_key', key)
+        const billIncludes = rawData.bill_includes || rawData
+        const allItems = [
+          ...(billIncludes.charges || []).map((c: any) => ({ ...c, _source: 'CARGO' })),
+          ...(billIncludes.bonuses || []).map((c: any) => ({ ...c, _source: 'BONIFICACION' }))
+        ]
 
-      let hasMore = true
-      while (hasMore) {
-        const detailsUrl = `${ML_API_BASE}/billing/integration/periods/key/${key}/group/ML/details?offset=${offset}&limit=${limit}`
-        const detailsResponse = await fetch(detailsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        })
-
-        if (!detailsResponse.ok) {
-          console.warn(`No se pudo obtener detalle para periodo ${key}`)
-          break
-        }
-
-        const detailsData = await detailsResponse.json()
-        const items = detailsData.results || detailsData.details || []
-
-        if (!Array.isArray(items) || items.length === 0) {
-          hasMore = false
-          break
-        }
-
-        // Mapear detalles
-        const detalles = items.map((item: any) => {
-          const tipo = item.charge_type || item.type || 'OTRO'
-          return {
+        if (allItems.length > 0) {
+          const detalles = allItems.map((item: any) => ({
             periodo_key: key,
-            tipo_cargo: tipo,
-            descripcion: item.description || item.detail || null,
-            orden_id: item.order_id ? String(item.order_id) : null,
-            item_id: item.item_id || item.listing_id || null,
-            sku: item.sku || null,
-            monto: parseFloat(item.amount || item.total || 0),
-            fecha_cargo: item.date || item.charge_date || fechaVenc,
+            tipo_cargo: item.type || item._source || 'OTRO',
+            descripcion: item.label || item.description || null,
+            orden_id: null,
+            item_id: null,
+            sku: null,
+            monto: parseFloat(item.amount || 0),
+            fecha_cargo: fechaVenc,
             detalle_raw: item
-          }
-        })
+          }))
 
-        const { error: detError } = await supabase
-          .from('billing_detalle')
-          .insert(detalles)
+          const { error: detError } = await supabase
+            .from('billing_detalle')
+            .insert(detalles)
 
-        if (!detError) {
-          detallesInsertados += detalles.length
+          if (!detError) detallesInsertados += detalles.length
         }
-
-        offset += limit
-        hasMore = items.length >= limit
       }
     }
 
@@ -1582,7 +1611,9 @@ async function syncBilling(supabase: any, accessToken: string) {
       JSON.stringify({
         success: true,
         periodos: periodosActualizados,
-        detalles: detallesInsertados
+        detalles: detallesInsertados,
+        total_periodos_api: periodos.length,
+        debug: debugInfo
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

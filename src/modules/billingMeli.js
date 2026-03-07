@@ -276,9 +276,11 @@ export const moduloBilling = {
 
             if (data?.success) {
                 mostrarNotificacion(`Billing sincronizado: ${data.periodos} periodos, ${data.detalles} registros`, 'success');
+                console.log('Billing sync response:', JSON.stringify(data, null, 2));
                 await moduloBilling.cargarDatos();
             } else {
                 mostrarNotificacion(data?.error || 'Error al sincronizar billing', 'error');
+                console.log('Billing sync error data:', JSON.stringify(data, null, 2));
             }
 
         } catch (error) {
