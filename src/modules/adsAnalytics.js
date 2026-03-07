@@ -15,6 +15,8 @@ let ventasTotales = 0;
 let filtros = { dias: 30, campaign: 'todas' };
 let chartGastoInstance = null;
 let chartTacosInstance = null;
+let sortCol = 'ventas_monto';
+let sortAsc = false;
 
 export const moduloAds = {
 
@@ -120,17 +122,17 @@ export const moduloAds = {
                             <thead class="bg-gray-50 sticky top-0">
                                 <tr>
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase w-8"></th>
-                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">SKU</th>
+                                    <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('sku')">SKU <span id="sort-sku"></span></th>
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">Impresiones</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">Clicks</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">CTR</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">Gasto</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">CPC</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ventas</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">Revenue</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">ROAS</th>
-                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase">ACOS</th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('impresiones')">Impresiones <span id="sort-impresiones"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('clicks')">Clicks <span id="sort-clicks"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('ctr')">CTR <span id="sort-ctr"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('costo')">Gasto <span id="sort-costo"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('cpc')">CPC <span id="sort-cpc"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('ventas_unidades')">Ventas <span id="sort-ventas_unidades"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('ventas_monto')">Revenue <span id="sort-ventas_monto"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('roas')">ROAS <span id="sort-roas"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('acos')">ACOS <span id="sort-acos"></span></th>
                                     <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase">Accion</th>
                                 </tr>
                             </thead>
@@ -156,6 +158,27 @@ export const moduloAds = {
     cambiarCampana: async (camp) => {
         filtros.campaign = camp;
         await moduloAds.cargarDatos();
+    },
+
+    ordenar: (col) => {
+        if (sortCol === col) {
+            sortAsc = !sortAsc;
+        } else {
+            sortCol = col;
+            sortAsc = col === 'sku'; // texto ascendente por defecto, numeros descendente
+        }
+        // Ordenar
+        resumenProductos.sort((a, b) => {
+            const va = a[col] ?? '';
+            const vb = b[col] ?? '';
+            if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+            return sortAsc ? va - vb : vb - va;
+        });
+        moduloAds.renderTablaProductos();
+        // Actualizar indicadores de sort en headers
+        document.querySelectorAll('[id^="sort-"]').forEach(el => el.textContent = '');
+        const ind = document.getElementById(`sort-${col}`);
+        if (ind) ind.textContent = sortAsc ? '▲' : '▼';
     },
 
     cargarDatos: async () => {
@@ -298,7 +321,7 @@ export const moduloAds = {
             // Semaforo
             let semaforo, accion;
             if (roas >= 4 && p.ventas_unidades >= 3) {
-                semaforo = 'estrella'; accion = 'Aumentar presupuesto';
+                semaforo = 'estrella'; accion = 'Escalar presupuesto';
             } else if (roas >= 4 && p.ventas_unidades < 3) {
                 semaforo = 'potencial'; accion = 'Subir presupuesto';
             } else if (roas >= 2 && roas < 4) {
