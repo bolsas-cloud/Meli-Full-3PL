@@ -1831,27 +1831,31 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       }
     }
 
-    // Limpiar datos agregados antiguos (los que tienen todos la misma fecha)
-    // Solo si es primera vez con backfill diario
+    // Limpiar datos agregados antiguos si es primera vez
     if (!ultimaMetrica?.fecha) {
       await supabase.from('ads_metricas_diarias').delete().not('item_id', 'like', '_CAMP_%')
     }
 
-    // Iterar día por día desde fechaDesde hasta ayer (hoy puede no tener datos completos)
+    // Iterar día por día, máximo 10 días por ejecución (evitar timeout de 60s)
     const ayer = new Date(hoy)
     ayer.setDate(hoy.getDate() - 1)
 
+    const MAX_DIAS = 10
     let totalItems = 0
     let diasProcesados = 0
     const cursor = new Date(fechaDesde)
+    let ultimoDiaProcesado = ''
 
-    while (cursor <= ayer) {
+    while (cursor <= ayer && diasProcesados < MAX_DIAS) {
       const diaStr = cursor.toISOString().split('T')[0]
       const items = await fetchAndStoreAdsForDay(supabase, accessToken, advertiserId, diaStr, skuMap)
       totalItems += items
       diasProcesados++
+      ultimoDiaProcesado = diaStr
       cursor.setDate(cursor.getDate() + 1)
     }
+
+    const hayMasDias = cursor <= ayer
 
     return new Response(
       JSON.stringify({
@@ -1860,7 +1864,8 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
         metricas_items: totalItems,
         dias_procesados: diasProcesados,
         fechaDesde: dateFromStr,
-        fechaHasta: ayer.toISOString().split('T')[0]
+        fechaHasta: ultimoDiaProcesado,
+        pendiente: hayMasDias ? 'Hay mas dias pendientes, vuelve a sincronizar' : null
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

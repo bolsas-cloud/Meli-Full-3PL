@@ -447,20 +447,38 @@ export const moduloAds = {
             btn.disabled = true;
             btn.classList.add('opacity-50');
             icon.classList.add('fa-spin');
-            mostrarNotificacion('Sincronizando metricas de publicidad...', 'info');
 
-            const { data, error } = await supabase.functions.invoke('sync-meli', {
-                body: { action: 'sync-ads-detailed' }
-            });
+            let totalItems = 0;
+            let totalDias = 0;
+            let campanas = 0;
+            let ronda = 1;
 
-            if (error) throw error;
+            // Loop: la Edge Function procesa max 10 dias por vez, repetimos si hay mas pendientes
+            while (true) {
+                mostrarNotificacion(`Sincronizando ads (ronda ${ronda})...`, 'info');
 
-            if (data?.success) {
-                mostrarNotificacion(`Ads sincronizado: ${data.campanas || 0} campanas, ${data.metricas_items || 0} items, ${data.dias_procesados || 0} dias`, 'success');
-                await moduloAds.cargarDatos();
-            } else {
-                mostrarNotificacion(data?.error || 'Error al sincronizar ads', 'error');
+                const { data, error } = await supabase.functions.invoke('sync-meli', {
+                    body: { action: 'sync-ads-detailed' }
+                });
+
+                if (error) throw error;
+                if (!data?.success) {
+                    mostrarNotificacion(data?.error || 'Error al sincronizar ads', 'error');
+                    break;
+                }
+
+                totalItems += (data.metricas_items || 0);
+                totalDias += (data.dias_procesados || 0);
+                campanas = data.campanas || campanas;
+
+                console.log(`Ronda ${ronda}: ${data.dias_procesados} dias (${data.fechaDesde} a ${data.fechaHasta})${data.pendiente ? ' - hay mas' : ' - completo'}`);
+
+                if (!data.pendiente) break;
+                ronda++;
             }
+
+            mostrarNotificacion(`Ads sincronizado: ${campanas} campanas, ${totalItems} items, ${totalDias} dias`, 'success');
+            await moduloAds.cargarDatos();
 
         } catch (error) {
             console.error('Error sincronizando ads:', error);
