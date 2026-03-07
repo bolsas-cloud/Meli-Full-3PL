@@ -14,11 +14,20 @@ import { moduloAds } from './modules/adsAnalytics.js';
 import { moduloPYL } from './modules/pyl.js';
 import { moduloCostos } from './modules/costosRentabilidad.js';
 
+// Módulo activo actual (para cleanup de realtime, timers, etc.)
+let moduloActivo = null;
+
 export const router = {
 
     // Función principal de navegación
     navegar: (ruta) => {
         console.log('Navegando a:', ruta);
+
+        // 0. Cleanup del módulo anterior (realtime, timers, etc.)
+        if (moduloActivo && typeof moduloActivo.destroy === 'function') {
+            moduloActivo.destroy();
+        }
+        moduloActivo = null;
 
         // 1. Actualizar título
         const titulos = {
@@ -96,6 +105,7 @@ export const router = {
 
             case 'costos':
                 moduloCostos.render(appContent);
+                moduloActivo = moduloCostos;
                 break;
 
             case 'depositos':

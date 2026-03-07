@@ -25,6 +25,8 @@ let configUmbrales = {
     umbral_envio_gratis: 33000,
     peso_default_gr: 500
 };
+let realtimeChannel = null;
+let realtimeDebounce = null;
 
 export const moduloCostos = {
 
@@ -117,6 +119,73 @@ export const moduloCostos = {
 
         window.moduloCostos = moduloCostos;
         await moduloCostos.cargarDatos();
+        moduloCostos.iniciarRealtime();
+    },
+
+    destroy: () => {
+        if (realtimeChannel) {
+            supabaseProduccion.removeChannel(realtimeChannel);
+            realtimeChannel = null;
+        }
+        if (realtimeDebounce) {
+            clearTimeout(realtimeDebounce);
+            realtimeDebounce = null;
+        }
+    },
+
+    iniciarRealtime: () => {
+        // Limpiar canal anterior si existe
+        if (realtimeChannel) {
+            supabaseProduccion.removeChannel(realtimeChannel);
+        }
+
+        realtimeChannel = supabaseProduccion
+            .channel('costos-productos-realtime')
+            .on('postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'productos' },
+                (payload) => {
+                    const p = payload.new;
+                    if (!p.sku) return;
+
+                    const costoNuevo = parseFloat(p.costo_calculado) || parseFloat(p.costo_producto) || 0;
+                    const costoAnterior = costosProduccion[p.sku]?.costo || 0;
+
+                    // Solo recalcular si el costo cambio
+                    if (costoNuevo !== costoAnterior) {
+                        console.log(`Realtime: costo actualizado ${p.sku}: $${costoAnterior} -> $${costoNuevo}`);
+                        if (costoNuevo > 0) {
+                            costosProduccion[p.sku] = { costo: costoNuevo, tipo: p.tipo, nombre: p.nombre_producto };
+                        }
+
+                        // Debounce para no recalcular en cada cambio masivo
+                        if (realtimeDebounce) clearTimeout(realtimeDebounce);
+                        realtimeDebounce = setTimeout(() => {
+                            // Actualizar costos en publicaciones
+                            publicaciones.forEach(pub => {
+                                if (costosProduccion[pub.sku]) {
+                                    pub.costo = costosProduccion[pub.sku].costo;
+                                    pub.costoOrigen = 'directo';
+                                } else if (pub.sku.length > 3) {
+                                    const base = pub.sku.slice(0, -3);
+                                    const cant = parseInt(pub.sku.slice(-3)) || 1;
+                                    const skuUnit = base + '001';
+                                    if (costosProduccion[skuUnit]) {
+                                        pub.costo = costosProduccion[skuUnit].costo * cant;
+                                        pub.costoOrigen = 'calculado';
+                                    }
+                                }
+                            });
+                            moduloCostos.recalcular();
+                            moduloCostos.renderKPIs();
+                            moduloCostos.renderTabla();
+                            mostrarNotificacion('Costos actualizados en tiempo real', 'success');
+                        }, 500);
+                    }
+                }
+            )
+            .subscribe((status) => {
+                console.log('Realtime costos:', status);
+            });
     },
 
     cargarDatos: async () => {
