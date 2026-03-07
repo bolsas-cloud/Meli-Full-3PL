@@ -125,4 +125,4 @@ La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="
 
 No incrementar para cambios puramente cosméticos, docs, o configuración.
 
-Currently v1.9.4.
+Currently v1.10.0.

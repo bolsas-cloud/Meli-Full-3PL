@@ -5,7 +5,7 @@
 // Para mostrar margen real mensual y por producto
 // ============================================
 
-import { supabase } from '../config.js';
+import { supabase, supabaseProduccion } from '../config.js';
 import { mostrarNotificacion, formatearMoneda } from '../utils.js';
 
 let datosMensuales = [];
@@ -37,10 +37,14 @@ export const moduloPYL = {
                 </div>
 
                 <!-- KPI Cards principales -->
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <span class="text-xs font-medium text-gray-500">Ventas Brutas</span>
                         <p class="text-xl font-bold text-gray-800 mt-1" id="kpi-pyl-ventas">-</p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                        <span class="text-xs font-medium text-gray-500">COGS</span>
+                        <p class="text-xl font-bold text-amber-600 mt-1" id="kpi-pyl-cogs">-</p>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <span class="text-xs font-medium text-gray-500">Costos ML</span>
@@ -51,7 +55,7 @@ export const moduloPYL = {
                         <p class="text-xl font-bold text-purple-600 mt-1" id="kpi-pyl-ads">-</p>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                        <span class="text-xs font-medium text-gray-500">Margen Neto</span>
+                        <span class="text-xs font-medium text-gray-500">Margen Real</span>
                         <p class="text-xl font-bold mt-1" id="kpi-pyl-margen">-</p>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -79,12 +83,13 @@ export const moduloPYL = {
                                 <tr>
                                     <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Mes</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ventas Brutas</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">COGS</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Comisiones</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Cargos Fijos</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Envios</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Publicidad</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Impuestos</th>
-                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Margen</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Margen Real</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">% Margen</th>
                                 </tr>
                             </thead>
@@ -120,6 +125,41 @@ export const moduloPYL = {
                 .select('fecha, costo_diario')
                 .order('fecha', { ascending: false });
 
+            // Cargar unidades vendidas por SKU/mes para COGS
+            const { data: unidadesData } = await supabase.rpc('rpc_unidades_mensuales_por_sku');
+
+            // Cargar costos de produccion
+            const { data: prodData } = await supabaseProduccion
+                .from('productos')
+                .select('sku, costo_calculado, costo_producto, tipo')
+                .in('tipo', ['Terminado', 'Pack'])
+                .not('sku', 'is', null)
+                .eq('activo', true);
+
+            // Indexar costos por SKU
+            const costosMap = {};
+            (prodData || []).forEach(p => {
+                const c = parseFloat(p.costo_calculado) || parseFloat(p.costo_producto) || 0;
+                if (c > 0) costosMap[p.sku] = c;
+            });
+
+            // Calcular COGS mensual
+            const cogsMensuales = {};
+            (unidadesData || []).forEach(u => {
+                let costo = costosMap[u.sku] || 0;
+                // Fallback: buscar unidad y multiplicar
+                if (costo === 0 && u.sku && u.sku.length > 3) {
+                    const base = u.sku.slice(0, -3);
+                    const cant = parseInt(u.sku.slice(-3)) || 1;
+                    const skuUnit = base + '001';
+                    if (costosMap[skuUnit]) costo = costosMap[skuUnit] * cant;
+                }
+                if (costo > 0) {
+                    if (!cogsMensuales[u.mes_key]) cogsMensuales[u.mes_key] = 0;
+                    cogsMensuales[u.mes_key] += costo * (parseInt(u.unidades) || 0);
+                }
+            });
+
             // Ventas ya vienen agrupadas por mes desde el RPC
             const ventasMensuales = {};
             (ventasRpc || []).forEach(v => {
@@ -149,21 +189,22 @@ export const moduloPYL = {
                 const billing = (billingData || []).find(b => b.anio === parseInt(anio) && b.mes === parseInt(mes));
                 const ventas = ventasMensuales[key] || 0;
                 const gastoAds = adsMensuales[key] || 0;
+                const cogs = cogsMensuales[key] || 0;
 
                 const comisiones = Math.abs(billing?.total_comisiones || 0);
                 const cargosFijos = Math.abs(billing?.total_cargos_fijos || 0);
                 const envios = Math.abs(billing?.total_envios || 0);
                 const publicidad = Math.abs(billing?.total_publicidad || 0) || gastoAds;
                 const impuestos = Math.abs(billing?.total_impuestos || 0);
-                const totalCostos = comisiones + cargosFijos + envios + publicidad + impuestos;
-                const margen = ventas - totalCostos;
+                const totalCostosML = comisiones + cargosFijos + envios + publicidad + impuestos;
+                const margen = ventas - cogs - totalCostosML;
                 const pctMargen = ventas > 0 ? (margen / ventas) * 100 : 0;
                 const tieneCostos = comisiones > 0 || envios > 0 || cargosFijos > 0 || impuestos > 0;
 
                 return {
                     key, anio: parseInt(anio), mes: parseInt(mes),
-                    ventas, comisiones, cargosFijos, envios, publicidad, impuestos,
-                    totalCostos, margen, pctMargen, tieneCostos
+                    ventas, cogs, comisiones, cargosFijos, envios, publicidad, impuestos,
+                    totalCostosML, margen, pctMargen, tieneCostos
                 };
             }).filter(d => d.ventas > 0 || d.tieneCostos);
 
@@ -204,7 +245,8 @@ export const moduloPYL = {
         };
 
         setEl('kpi-pyl-ventas', fmt(d.ventas));
-        setEl('kpi-pyl-costos', fmt(d.totalCostos));
+        setEl('kpi-pyl-cogs', d.cogs > 0 ? fmt(d.cogs) : 'sin datos');
+        setEl('kpi-pyl-costos', fmt(d.totalCostosML));
         setEl('kpi-pyl-ads', fmt(d.publicidad));
         setEl('kpi-pyl-margen', fmt(d.margen));
 
@@ -226,7 +268,7 @@ export const moduloPYL = {
         const mesesConDatos = datosMensuales.filter(d => d.tieneCostos);
 
         if (mesesConDatos.length === 0) {
-            body.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">Sincroniza Billing ML para ver el P&L</td></tr>';
+            body.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-400">Sincroniza Billing ML para ver el P&L</td></tr>';
             return;
         }
 
@@ -236,6 +278,7 @@ export const moduloPYL = {
                 <tr class="hover:bg-gray-50 cursor-pointer" onclick="moduloPYL.cambiarMes('${d.key}'); document.getElementById('sel-mes-pyl').value='${d.key}'">
                     <td class="px-4 py-3 font-medium text-gray-800">${mesNombre} ${d.anio}</td>
                     <td class="px-4 py-3 text-right font-medium">$ ${fmt(d.ventas)}</td>
+                    <td class="px-4 py-3 text-right text-amber-600">${d.cogs > 0 ? '$ ' + fmt(d.cogs) : '<span class="text-gray-300">-</span>'}</td>
                     <td class="px-4 py-3 text-right text-red-600">$ ${fmt(d.comisiones)}</td>
                     <td class="px-4 py-3 text-right text-red-600">$ ${fmt(d.cargosFijos)}</td>
                     <td class="px-4 py-3 text-right text-orange-600">$ ${fmt(d.envios)}</td>
@@ -266,6 +309,7 @@ export const moduloPYL = {
                 labels,
                 datasets: [
                     { label: 'Ventas', data: ultimos.map(d => d.ventas), backgroundColor: 'rgba(34, 197, 94, 0.7)', order: 2 },
+                    { label: 'COGS', data: ultimos.map(d => -d.cogs), backgroundColor: 'rgba(245, 158, 11, 0.7)', stack: 'costos', order: 2 },
                     { label: 'Comisiones', data: ultimos.map(d => -d.comisiones), backgroundColor: 'rgba(59, 130, 246, 0.7)', stack: 'costos', order: 2 },
                     { label: 'Envios', data: ultimos.map(d => -d.envios), backgroundColor: 'rgba(249, 115, 22, 0.7)', stack: 'costos', order: 2 },
                     { label: 'Publicidad', data: ultimos.map(d => -d.publicidad), backgroundColor: 'rgba(139, 92, 246, 0.7)', stack: 'costos', order: 2 },
@@ -309,6 +353,7 @@ export const moduloPYL = {
         const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
         const fmt = (n) => Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+        const mesesPDF = datosMensuales.filter(d => d.tieneCostos).slice(0, 6);
         const ventana = window.open('', '_blank');
         ventana.document.write(`<!DOCTYPE html>
 <html><head>
@@ -323,8 +368,9 @@ export const moduloPYL = {
     th:first-child { text-align: left; }
     td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
     td:first-child { text-align: left; font-weight: 600; }
-    .positive { color: #16a34a; } .negative { color: #dc2626; }
+    .positive { color: #16a34a; } .negative { color: #dc2626; } .amber { color: #d97706; }
     .total-row { background: #f0fdf4; font-weight: 700; }
+    .subtotal-row { background: #fefce8; font-weight: 600; }
     .no-print { margin-top: 16px; text-align: center; }
     @media print { .no-print { display: none !important; } body { padding: 10px; } @page { orientation: landscape; } }
 </style>
@@ -332,30 +378,32 @@ export const moduloPYL = {
 <div class="header">
     <div>
         <h1>Estado de Resultados (P&L) - Mercado Libre</h1>
-        <p style="color:#64748b; margin-top:4px;">Ventas brutas menos costos ML = Margen antes de COGS</p>
+        <p style="color:#64748b; margin-top:4px;">Ventas brutas - COGS - Costos ML = Margen Real</p>
     </div>
     <div style="font-size:11px; color:#666;">${fecha}</div>
 </div>
 <table>
     <thead><tr>
         <th style="text-align:left">Concepto</th>
-        ${datosMensuales.slice(0, 6).map(d => {
+        ${mesesPDF.map(d => {
             const mesNombre = new Date(d.anio, d.mes - 1).toLocaleString('es-AR', { month: 'short' });
             return `<th>${mesNombre} ${d.anio}</th>`;
         }).join('')}
     </tr></thead>
     <tbody>
-        <tr><td>Ventas Brutas</td>${datosMensuales.slice(0, 6).map(d => `<td class="positive">$ ${fmt(d.ventas)}</td>`).join('')}</tr>
-        <tr><td>(-) Comisiones ML</td>${datosMensuales.slice(0, 6).map(d => `<td class="negative">$ ${fmt(d.comisiones)}</td>`).join('')}</tr>
-        <tr><td>(-) Cargos Fijos</td>${datosMensuales.slice(0, 6).map(d => `<td class="negative">$ ${fmt(d.cargosFijos)}</td>`).join('')}</tr>
-        <tr><td>(-) Envios</td>${datosMensuales.slice(0, 6).map(d => `<td class="negative">$ ${fmt(d.envios)}</td>`).join('')}</tr>
-        <tr><td>(-) Publicidad</td>${datosMensuales.slice(0, 6).map(d => `<td class="negative">$ ${fmt(d.publicidad)}</td>`).join('')}</tr>
-        <tr><td>(-) Impuestos</td>${datosMensuales.slice(0, 6).map(d => `<td class="negative">$ ${fmt(d.impuestos)}</td>`).join('')}</tr>
-        <tr class="total-row"><td>= Margen Neto</td>${datosMensuales.slice(0, 6).map(d => `<td class="${d.margen >= 0 ? 'positive' : 'negative'}">$ ${fmt(d.margen)}</td>`).join('')}</tr>
-        <tr class="total-row"><td>% Margen</td>${datosMensuales.slice(0, 6).map(d => `<td class="${d.pctMargen >= 20 ? 'positive' : 'negative'}">${d.pctMargen.toFixed(1)}%</td>`).join('')}</tr>
+        <tr><td>Ventas Brutas</td>${mesesPDF.map(d => `<td class="positive">$ ${fmt(d.ventas)}</td>`).join('')}</tr>
+        <tr><td>(-) COGS (Costo Prod.)</td>${mesesPDF.map(d => `<td class="amber">${d.cogs > 0 ? '$ ' + fmt(d.cogs) : '-'}</td>`).join('')}</tr>
+        <tr class="subtotal-row"><td>= Margen Bruto</td>${mesesPDF.map(d => `<td class="${(d.ventas - d.cogs) >= 0 ? 'positive' : 'negative'}">$ ${fmt(d.ventas - d.cogs)}</td>`).join('')}</tr>
+        <tr><td>(-) Comisiones ML</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.comisiones)}</td>`).join('')}</tr>
+        <tr><td>(-) Cargos Fijos</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.cargosFijos)}</td>`).join('')}</tr>
+        <tr><td>(-) Envios</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.envios)}</td>`).join('')}</tr>
+        <tr><td>(-) Publicidad</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.publicidad)}</td>`).join('')}</tr>
+        <tr><td>(-) Impuestos</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.impuestos)}</td>`).join('')}</tr>
+        <tr class="total-row"><td>= Margen Real</td>${mesesPDF.map(d => `<td class="${d.margen >= 0 ? 'positive' : 'negative'}">$ ${fmt(d.margen)}</td>`).join('')}</tr>
+        <tr class="total-row"><td>% Margen</td>${mesesPDF.map(d => `<td class="${d.pctMargen >= 20 ? 'positive' : 'negative'}">${d.pctMargen.toFixed(1)}%</td>`).join('')}</tr>
     </tbody>
 </table>
-<p style="margin-top:12px; font-size:9px; color:#94a3b8;">* Margen antes de COGS (costo de mercaderia). No incluye costos de produccion, personal ni operativos propios.</p>
+<p style="margin-top:12px; font-size:9px; color:#94a3b8;">* COGS calculado desde costos de ProduccionTextilApp. Margen Real incluye costo de mercaderia.</p>
 <div class="no-print">
     <button onclick="window.print()" style="padding:8px 24px; background:#059669; color:white; border:none; border-radius:6px; font-size:13px; cursor:pointer;">Imprimir / Guardar PDF</button>
 </div>

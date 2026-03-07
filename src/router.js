@@ -12,6 +12,7 @@ import { moduloDepositos } from './modules/depositos.js';
 import { moduloBilling } from './modules/billingMeli.js';
 import { moduloAds } from './modules/adsAnalytics.js';
 import { moduloPYL } from './modules/pyl.js';
+import { moduloCostos } from './modules/costosRentabilidad.js';
 
 export const router = {
 
@@ -32,6 +33,7 @@ export const router = {
             'billing': 'Billing ML',
             'ads': 'Ads Analytics',
             'pyl': 'P&L Integrado',
+            'costos': 'Costos y Rentabilidad',
             'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
@@ -90,6 +92,10 @@ export const router = {
 
             case 'pyl':
                 moduloPYL.render(appContent);
+                break;
+
+            case 'costos':
+                moduloCostos.render(appContent);
                 break;
 
             case 'depositos':
