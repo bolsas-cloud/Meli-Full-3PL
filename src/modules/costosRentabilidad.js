@@ -19,6 +19,13 @@ let sortCol = 'margen_pct';
 let sortAsc = true;
 let filtroBusqueda = '';
 
+// Config de costos ML (envio, fijos, umbrales)
+let configCostosEnvio = [];
+let configUmbrales = {
+    umbral_envio_gratis: 33000,
+    peso_default_gr: 500
+};
+
 export const moduloCostos = {
 
     render: async (contenedor) => {
@@ -91,6 +98,7 @@ export const moduloCostos = {
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('costo')">Costo Prod</th>
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('comision_ml')">Comision</th>
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('cargo_fijo')">Cargo Fijo</th>
+                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('envio')">Envio</th>
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('impuestos')">Impuestos</th>
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('publi_est')">Publi est.</th>
                                     <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('margen')">Margen $</th>
@@ -99,7 +107,7 @@ export const moduloCostos = {
                                 </tr>
                             </thead>
                             <tbody id="costos-tabla-body" class="divide-y divide-gray-100">
-                                <tr><td colspan="11" class="px-4 py-8 text-center text-gray-400">Cargando...</td></tr>
+                                <tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Cargando...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -113,19 +121,42 @@ export const moduloCostos = {
 
     cargarDatos: async () => {
         try {
-            // 1. Publicaciones ML con costos ML
-            const { data: pubData } = await supabase
-                .from('publicaciones_meli')
-                .select('sku, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, tipo_logistica, estado')
-                .not('sku', 'is', null);
+            // Cargar todo en paralelo
+            const [pubRes, prodRes, envioRes, umbralesRes] = await Promise.all([
+                // 1. Publicaciones ML con costos ML + peso y envio gratis
+                supabase
+                    .from('publicaciones_meli')
+                    .select('sku, titulo, precio, comision_ml, cargo_fijo_ml, costo_envio_ml, impuestos_estimados, neto_estimado, tipo_logistica, estado, peso_gr, tiene_envio_gratis')
+                    .not('sku', 'is', null),
+                // 2. Costos de Produccion (Terminado + Pack)
+                supabaseProduccion
+                    .from('productos')
+                    .select('sku, nombre_producto, tipo, costo_calculado, costo_producto')
+                    .in('tipo', ['Terminado', 'Pack'])
+                    .not('sku', 'is', null)
+                    .eq('activo', true),
+                // 3. Config costos envio por peso
+                supabase
+                    .from('config_costos_envio_ml')
+                    .select('*')
+                    .eq('activo', true)
+                    .order('peso_desde_gr'),
+                // 4. Umbrales
+                supabase
+                    .from('config_umbrales_ml')
+                    .select('*')
+            ]);
 
-            // 2. Costos de Produccion (Terminado + Pack)
-            const { data: prodData } = await supabaseProduccion
-                .from('productos')
-                .select('sku, nombre_producto, tipo, costo_calculado, costo_producto')
-                .in('tipo', ['Terminado', 'Pack'])
-                .not('sku', 'is', null)
-                .eq('activo', true);
+            const pubData = pubRes.data;
+            const prodData = prodRes.data;
+
+            // Procesar config envio
+            if (envioRes.data?.length > 0) configCostosEnvio = envioRes.data;
+            if (umbralesRes.data?.length > 0) {
+                umbralesRes.data.forEach(u => {
+                    configUmbrales[u.clave] = parseFloat(u.valor) || 0;
+                });
+            }
 
             // Indexar costos por SKU
             costosProduccion = {};
@@ -141,8 +172,14 @@ export const moduloCostos = {
                 const precio = parseFloat(p.precio) || 0;
                 const comisionMl = parseFloat(p.comision_ml) || 0;
                 const cargoFijo = parseFloat(p.cargo_fijo_ml) || 0;
-                const envio = parseFloat(p.costo_envio_ml) || 0;
                 const impuestos = parseFloat(p.impuestos_estimados) || 0;
+                const pesoGr = parseFloat(p.peso_gr) || 0;
+                const tieneEnvioGratis = p.tiene_envio_gratis === true;
+
+                // Calcular costo de envio gratis (el vendedor absorbe parte)
+                const costoEnvio = tieneEnvioGratis
+                    ? moduloCostos.calcularCostoEnvio(pesoGr, precio)
+                    : 0;
 
                 // Buscar costo: primero match directo por SKU
                 let costo = 0;
@@ -162,7 +199,7 @@ export const moduloCostos = {
                 }
 
                 const publiEst = precio * (configCalc.pctPublicidad / 100);
-                const totalDescuentos = comisionMl + cargoFijo + envio + impuestos + publiEst;
+                const totalDescuentos = comisionMl + cargoFijo + costoEnvio + impuestos + publiEst;
                 const margen = precio - costo - totalDescuentos;
                 const margenPct = precio > 0 ? (margen / precio) * 100 : 0;
 
@@ -174,13 +211,15 @@ export const moduloCostos = {
                     costoOrigen,
                     comision_ml: comisionMl,
                     cargo_fijo: cargoFijo,
-                    envio,
+                    envio: costoEnvio,
                     impuestos,
                     publi_est: publiEst,
                     margen,
                     margen_pct: margenPct,
                     estado: p.estado,
-                    tipo_logistica: p.tipo_logistica
+                    tipo_logistica: p.tipo_logistica,
+                    peso_gr: pesoGr,
+                    tiene_envio_gratis: tieneEnvioGratis
                 };
             });
 
@@ -205,21 +244,36 @@ export const moduloCostos = {
 
     recalcular: () => {
         publicaciones.forEach(p => {
+            // Recalcular envio con precio actual
+            p.envio = p.tiene_envio_gratis
+                ? moduloCostos.calcularCostoEnvio(p.peso_gr, p.precio)
+                : 0;
             p.publi_est = p.precio * (configCalc.pctPublicidad / 100);
             const totalDescuentos = p.comision_ml + p.cargo_fijo + p.envio + p.impuestos + p.publi_est;
             p.margen = p.precio - p.costo - totalDescuentos;
             p.margen_pct = p.precio > 0 ? (p.margen / p.precio) * 100 : 0;
 
-            // Calcular precio sugerido
-            // Precio = (Costo + CargoFijo + Envio) / (1 - %comision - %publi - %promo - %impuestos - %margen)
+            // Calcular precio sugerido con iteracion
+            // El envio depende del precio, asi que iteramos para converger
             if (p.costo > 0) {
                 const pctComision = p.precio > 0 ? (p.comision_ml / p.precio) : 0.153;
                 const pctImpuestos = p.precio > 0 ? (p.impuestos / p.precio) : 0;
-                const divisor = 1 - pctComision - (configCalc.pctPublicidad / 100) - (configCalc.pctPromocion / 100) - pctImpuestos - (configCalc.margenObjetivo / 100);
+                const pctVariable = pctComision + (configCalc.pctPublicidad / 100) + (configCalc.pctPromocion / 100) + pctImpuestos + (configCalc.margenObjetivo / 100);
+                const divisor = 1 - pctVariable;
+
                 if (divisor > 0.05) {
-                    p.precio_sugerido = Math.ceil((p.costo + p.cargo_fijo + p.envio) / divisor);
+                    // Primera estimacion sin envio
+                    let precioEst = Math.ceil((p.costo + p.cargo_fijo) / divisor);
+                    // Iterar 3 veces para incluir envio en el precio sugerido
+                    for (let i = 0; i < 3; i++) {
+                        const envioEst = p.tiene_envio_gratis
+                            ? moduloCostos.calcularCostoEnvio(p.peso_gr, precioEst)
+                            : 0;
+                        precioEst = Math.ceil((p.costo + p.cargo_fijo + envioEst) / divisor);
+                    }
+                    p.precio_sugerido = precioEst;
                 } else {
-                    p.precio_sugerido = null; // Imposible alcanzar ese margen
+                    p.precio_sugerido = null;
                 }
             } else {
                 p.precio_sugerido = null;
@@ -294,7 +348,7 @@ export const moduloCostos = {
         document.querySelectorAll('#costos-tabla-body')?.closest?.('table')?.querySelectorAll?.('th');
 
         if (items.length === 0) {
-            body.innerHTML = '<tr><td colspan="11" class="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>';
+            body.innerHTML = '<tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>';
             return;
         }
 
@@ -332,6 +386,7 @@ export const moduloCostos = {
                     <td class="px-3 py-2 text-right">${costoDisplay}${costoTag}</td>
                     <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.comision_ml)}</td>
                     <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.cargo_fijo)}</td>
+                    <td class="px-3 py-2 text-right text-orange-500">${p.envio > 0 ? '$ ' + fmt(p.envio) : '<span class="text-gray-300">-</span>'}</td>
                     <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.impuestos)}</td>
                     <td class="px-3 py-2 text-right text-purple-500">$ ${fmt(p.publi_est)}</td>
                     <td class="px-3 py-2 text-right font-medium ${margenColor}">$ ${fmt(p.margen)}</td>
@@ -342,9 +397,26 @@ export const moduloCostos = {
         }).join('');
     },
 
+    // Calcular costo de envio gratis segun peso y precio
+    calcularCostoEnvio: (pesoGr, precio) => {
+        if (!configCostosEnvio || configCostosEnvio.length === 0) return 0;
+
+        const umbral = configUmbrales.umbral_envio_gratis || 33000;
+        const tieneDescuento = precio >= umbral;
+        const pesoEfectivo = pesoGr > 0 ? pesoGr : (configUmbrales.peso_default_gr || 500);
+
+        const rango = configCostosEnvio.find(r =>
+            pesoEfectivo >= parseFloat(r.peso_desde_gr) && pesoEfectivo < parseFloat(r.peso_hasta_gr)
+        );
+
+        const r = rango || configCostosEnvio[configCostosEnvio.length - 1];
+        return tieneDescuento
+            ? parseFloat(r.costo_con_descuento) || 0
+            : parseFloat(r.costo_sin_descuento) || 0;
+    },
+
     // Exportar datos para P&L
     obtenerCostosParaPYL: () => {
-        // Devuelve map SKU -> costo para calcular COGS en P&L
         const map = {};
         publicaciones.forEach(p => {
             if (p.costo > 0) map[p.sku] = p.costo;
