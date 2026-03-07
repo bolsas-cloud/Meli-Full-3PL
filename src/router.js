@@ -9,6 +9,9 @@ import { moduloPrecios } from './modules/precios.js';
 import { moduloPublicaciones } from './modules/publicaciones.js';
 import { moduloEtiquetas } from './modules/etiquetas.js';
 import { moduloDepositos } from './modules/depositos.js';
+import { moduloBilling } from './modules/billingMeli.js';
+import { moduloAds } from './modules/adsAnalytics.js';
+import { moduloPYL } from './modules/pyl.js';
 
 export const router = {
 
@@ -26,6 +29,9 @@ export const router = {
             'precios': 'Gestión de Precios',
             'publicaciones': 'Gestión de Publicaciones',
             'reconciliacion': 'Reconciliación 3PL',
+            'billing': 'Billing ML',
+            'ads': 'Ads Analytics',
+            'pyl': 'P&L Integrado',
             'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
@@ -72,6 +78,18 @@ export const router = {
 
             case 'publicaciones':
                 moduloPublicaciones.render(appContent);
+                break;
+
+            case 'billing':
+                moduloBilling.render(appContent);
+                break;
+
+            case 'ads':
+                moduloAds.render(appContent);
+                break;
+
+            case 'pyl':
+                moduloPYL.render(appContent);
                 break;
 
             case 'depositos':

@@ -103,8 +103,17 @@ serve(async (req) => {
       case 'sync-ads':
         return await syncAds(supabase, accessToken)
 
+      case 'sync-ads-detailed':
+        return await syncAdsDetailed(supabase, accessToken)
+
+      case 'sync-billing':
+        return await syncBilling(supabase, accessToken)
+
       case 'update-stock':
         return await updateStock(supabase, accessToken, cambiosStock)
+
+      case 'backfill-logistica':
+        return await backfillLogistica(supabase, accessToken)
 
       default:
         return new Response(
@@ -542,6 +551,28 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
         }
 
         // ============================================
+        // OBTENER TIPO LOGÍSTICA via /shipments/{shippingId}
+        // Determina cómo se envió realmente (fulfillment, self_service, cross_docking, etc.)
+        // ============================================
+        let tipoLogistica: string | null = null
+        const shippingId = order.shipping?.id
+        if (shippingId) {
+          try {
+            const shipmentResponse = await fetch(
+              `${ML_API_BASE}/shipments/${shippingId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            )
+
+            if (shipmentResponse.ok) {
+              const shipmentData = await shipmentResponse.json()
+              tipoLogistica = shipmentData.logistic_type || null
+            }
+          } catch (shipErr) {
+            console.error(`Error obteniendo shipment ${shippingId}:`, shipErr)
+          }
+        }
+
+        // ============================================
         // OBTENER NETO RECIBIDO via /collections/{paymentId}
         // Igual que en GAS (ApiMeli_Orders.js líneas 106-128)
         // ============================================
@@ -651,7 +682,8 @@ async function syncOrdersInternal(supabase: any, accessToken: string, sellerId: 
             costo_meli: itemMeliCost !== null ? Math.round(itemMeliCost * 100) / 100 : null,
             pct_costo_meli: pctCostoMeli !== null ? Math.round(pctCostoMeli * 100) / 100 : null,
             estado: order.status,
-            comprador_nickname: order.buyer?.nickname || null
+            comprador_nickname: order.buyer?.nickname || null,
+            tipo_logistica: tipoLogistica
           }
 
           const { error } = await supabase
@@ -1258,4 +1290,496 @@ async function updateStock(supabase: any, accessToken: string, cambios: CambioSt
     }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+// ============================================
+// BACKFILL: Rellenar tipo_logistica en órdenes existentes
+// Para órdenes que ya estaban en BD antes de agregar este campo
+// - Obtiene órdenes con tipo_logistica NULL
+// - Consulta /orders/{id} para obtener shipping.id
+// - Consulta /shipments/{id} para obtener logistic_type
+// ============================================
+async function backfillLogistica(supabase: any, accessToken: string) {
+  const BATCH_LIMIT = 50  // Procesar máximo 50 órdenes por ejecución (evita timeout)
+
+  try {
+    // Obtener órdenes sin tipo_logistica (IDs únicos, limitado)
+    const { data: ordenesSinTipo, error: queryError } = await supabase
+      .from('ordenes_meli')
+      .select('id_orden')
+      .is('tipo_logistica', null)
+
+    if (queryError) throw queryError
+
+    if (!ordenesSinTipo || ordenesSinTipo.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, updated: 0, pendientes: 0, message: 'No hay órdenes pendientes de backfill' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Deduplicar IDs (una orden puede tener múltiples items/filas)
+    const todosLosIds = [...new Set(ordenesSinTipo.map((o: any) => String(o.id_orden)))]
+    const idsUnicos = todosLosIds.slice(0, BATCH_LIMIT)
+    const pendientes = todosLosIds.length - idsUnicos.length
+    console.log(`Backfill: procesando ${idsUnicos.length} de ${todosLosIds.length} órdenes (pendientes: ${pendientes})`)
+
+    let updated = 0
+    let errores = 0
+
+    for (const orderId of idsUnicos) {
+      try {
+        // Obtener shipping.id desde la orden en ML
+        const orderResponse = await fetch(
+          `${ML_API_BASE}/orders/${orderId}`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        )
+
+        if (!orderResponse.ok) {
+          errores++
+          continue
+        }
+
+        const orderData = await orderResponse.json()
+        const shippingId = orderData.shipping?.id
+
+        if (!shippingId) {
+          errores++
+          continue
+        }
+
+        // Obtener logistic_type desde el shipment
+        const shipmentResponse = await fetch(
+          `${ML_API_BASE}/shipments/${shippingId}`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        )
+
+        if (!shipmentResponse.ok) {
+          errores++
+          continue
+        }
+
+        const shipmentData = await shipmentResponse.json()
+        const tipoLogistica = shipmentData.logistic_type || null
+
+        if (tipoLogistica) {
+          // Actualizar TODAS las filas de esta orden
+          const { error: updateError } = await supabase
+            .from('ordenes_meli')
+            .update({ tipo_logistica: tipoLogistica })
+            .eq('id_orden', orderId)
+
+          if (!updateError) {
+            updated++
+          } else {
+            errores++
+          }
+        }
+
+      } catch (err) {
+        console.error(`Error backfill orden ${orderId}:`, err)
+        errores++
+      }
+    }
+
+    console.log(`Backfill completado - Actualizadas: ${updated}, Errores: ${errores}, Pendientes: ${pendientes}`)
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        ordenes_procesadas: idsUnicos.length,
+        updated,
+        errores,
+        pendientes
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error en backfillLogistica:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// ============================================
+// SYNC BILLING: Obtener costos y gastos de ML
+// Endpoint: /billing/monthly/periods
+//           /billing/integration/periods/key/$key/summary
+//           /billing/integration/periods/key/$key/group/ML/details
+// ============================================
+async function syncBilling(supabase: any, accessToken: string) {
+  try {
+    // PASO 1: Obtener periodos de facturación (últimos 12 meses)
+    const periodsResponse = await fetch(
+      `${ML_API_BASE}/billing/monthly/periods`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    )
+
+    if (!periodsResponse.ok) {
+      const errText = await periodsResponse.text()
+      console.error('Error obteniendo periodos:', errText)
+      return new Response(
+        JSON.stringify({ success: false, error: 'No se pudieron obtener periodos de facturación' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const periodsData = await periodsResponse.json()
+    const periodos = periodsData.periods || periodsData.results || periodsData || []
+
+    if (!Array.isArray(periodos) || periodos.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, message: 'Sin periodos de facturación', raw: periodsData }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log(`Encontrados ${periodos.length} periodos de facturación`)
+
+    let periodosActualizados = 0
+    let detallesInsertados = 0
+
+    // PASO 2: Para cada periodo, obtener summary y details
+    for (const periodo of periodos) {
+      const key = periodo.key || periodo.id || periodo.period_id
+      if (!key) continue
+
+      const fechaVenc = periodo.expiration_date || periodo.due_date || null
+      const mes = fechaVenc ? new Date(fechaVenc).getMonth() + 1 : null
+      const anio = fechaVenc ? new Date(fechaVenc).getFullYear() : null
+
+      // Obtener summary
+      const summaryUrl = `${ML_API_BASE}/billing/integration/periods/key/${key}/summary?group=ML`
+      const summaryResponse = await fetch(summaryUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      })
+
+      let summaryData: any = null
+      let totales = {
+        comisiones: 0, cargos_fijos: 0, envios: 0,
+        publicidad: 0, impuestos: 0, reembolsos: 0, otros: 0, general: 0
+      }
+
+      if (summaryResponse.ok) {
+        summaryData = await summaryResponse.json()
+
+        // Clasificar cargos del summary
+        const charges = summaryData.charges || summaryData.items || []
+        if (Array.isArray(charges)) {
+          for (const charge of charges) {
+            const tipo = (charge.type || charge.charge_type || '').toLowerCase()
+            const monto = parseFloat(charge.amount || charge.total || 0)
+
+            if (tipo.includes('comision') || tipo.includes('commission') || tipo.includes('sale_fee')) {
+              totales.comisiones += monto
+            } else if (tipo.includes('fijo') || tipo.includes('fixed') || tipo.includes('listing')) {
+              totales.cargos_fijos += monto
+            } else if (tipo.includes('envio') || tipo.includes('shipping') || tipo.includes('mercado_envios')) {
+              totales.envios += monto
+            } else if (tipo.includes('publicidad') || tipo.includes('advertising') || tipo.includes('ads')) {
+              totales.publicidad += monto
+            } else if (tipo.includes('impuesto') || tipo.includes('tax') || tipo.includes('percepcion') || tipo.includes('retencion')) {
+              totales.impuestos += monto
+            } else if (tipo.includes('reembolso') || tipo.includes('refund') || tipo.includes('credit')) {
+              totales.reembolsos += monto
+            } else {
+              totales.otros += monto
+            }
+          }
+        }
+
+        totales.general = summaryData.total || (
+          totales.comisiones + totales.cargos_fijos + totales.envios +
+          totales.publicidad + totales.impuestos + totales.reembolsos + totales.otros
+        )
+      }
+
+      // Upsert periodo
+      const { error: periodoError } = await supabase
+        .from('billing_periodos')
+        .upsert({
+          periodo_key: key,
+          fecha_vencimiento: fechaVenc,
+          mes, anio,
+          fecha_sync: new Date().toISOString(),
+          total_comisiones: totales.comisiones,
+          total_cargos_fijos: totales.cargos_fijos,
+          total_envios: totales.envios,
+          total_publicidad: totales.publicidad,
+          total_impuestos: totales.impuestos,
+          total_reembolsos: totales.reembolsos,
+          total_otros: totales.otros,
+          total_general: totales.general,
+          raw_summary: summaryData
+        }, { onConflict: 'periodo_key' })
+
+      if (periodoError) {
+        console.error(`Error guardando periodo ${key}:`, periodoError)
+        continue
+      }
+      periodosActualizados++
+
+      // Obtener details (paginado)
+      let offset = 0
+      const limit = 500
+
+      // Limpiar detalles previos del periodo
+      await supabase.from('billing_detalle').delete().eq('periodo_key', key)
+
+      let hasMore = true
+      while (hasMore) {
+        const detailsUrl = `${ML_API_BASE}/billing/integration/periods/key/${key}/group/ML/details?offset=${offset}&limit=${limit}`
+        const detailsResponse = await fetch(detailsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        })
+
+        if (!detailsResponse.ok) {
+          console.warn(`No se pudo obtener detalle para periodo ${key}`)
+          break
+        }
+
+        const detailsData = await detailsResponse.json()
+        const items = detailsData.results || detailsData.details || []
+
+        if (!Array.isArray(items) || items.length === 0) {
+          hasMore = false
+          break
+        }
+
+        // Mapear detalles
+        const detalles = items.map((item: any) => {
+          const tipo = item.charge_type || item.type || 'OTRO'
+          return {
+            periodo_key: key,
+            tipo_cargo: tipo,
+            descripcion: item.description || item.detail || null,
+            orden_id: item.order_id ? String(item.order_id) : null,
+            item_id: item.item_id || item.listing_id || null,
+            sku: item.sku || null,
+            monto: parseFloat(item.amount || item.total || 0),
+            fecha_cargo: item.date || item.charge_date || fechaVenc,
+            detalle_raw: item
+          }
+        })
+
+        const { error: detError } = await supabase
+          .from('billing_detalle')
+          .insert(detalles)
+
+        if (!detError) {
+          detallesInsertados += detalles.length
+        }
+
+        offset += limit
+        hasMore = items.length >= limit
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        periodos: periodosActualizados,
+        detalles: detallesInsertados
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error en syncBilling:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// ============================================
+// SYNC ADS DETAILED: Métricas completas por item y campaña
+// Expande el syncAds básico (solo costo diario) con métricas detalladas
+// Endpoint: /advertising/advertisers/$ID/product_ads/campaigns?metrics=...&aggregation_type=DAILY
+// ============================================
+async function syncAdsDetailed(supabase: any, accessToken: string) {
+  try {
+    // PASO 1: Obtener Advertiser ID (reutilizar lógica existente)
+    const { data: cachedAdvertiser } = await supabase
+      .from('config_meli')
+      .select('valor')
+      .eq('clave', 'advertiser_id')
+      .single()
+
+    let advertiserId = cachedAdvertiser?.valor
+
+    if (!advertiserId) {
+      const advertiserResponse = await fetch(
+        `${ML_API_BASE}/advertising/advertisers?product_id=PADS`,
+        { headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '1' } }
+      )
+
+      if (!advertiserResponse.ok) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'No se pudo obtener advertiser_id' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const advertiserData = await advertiserResponse.json()
+      if (advertiserData.advertisers?.[0]?.advertiser_id) {
+        advertiserId = advertiserData.advertisers[0].advertiser_id
+        await supabase.from('config_meli')
+          .upsert({ clave: 'advertiser_id', valor: String(advertiserId) }, { onConflict: 'clave' })
+      } else {
+        return new Response(
+          JSON.stringify({ success: false, error: 'No se encontró advertiser_id' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // PASO 2: Determinar rango de fechas (incremental)
+    const hoy = new Date()
+    let fechaDesde: Date
+
+    const { data: ultimaMetrica } = await supabase
+      .from('ads_metricas_diarias')
+      .select('fecha')
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (ultimaMetrica?.fecha) {
+      fechaDesde = new Date(ultimaMetrica.fecha)
+      fechaDesde.setDate(fechaDesde.getDate() - 5) // 5 días de margen
+    } else {
+      fechaDesde = new Date()
+      fechaDesde.setDate(hoy.getDate() - 89) // máx 90 días
+    }
+
+    const dateFrom = fechaDesde.toISOString().split('T')[0]
+    const dateTo = hoy.toISOString().split('T')[0]
+
+    // PASO 3: Obtener campañas
+    const campaignsUrl = `${ML_API_BASE}/advertising/advertisers/${advertiserId}/product_ads/campaigns`
+    const campaignsResponse = await fetch(campaignsUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
+    })
+
+    if (!campaignsResponse.ok) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'No se pudieron obtener campañas' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const campaignsData = await campaignsResponse.json()
+    const campaigns = campaignsData.results || []
+
+    // Guardar campañas
+    let campanasGuardadas = 0
+    for (const camp of campaigns) {
+      const { error } = await supabase.from('ads_campanas').upsert({
+        campaign_id: String(camp.campaign_id),
+        nombre: camp.name || camp.title || `Campaña ${camp.campaign_id}`,
+        status: camp.status || 'unknown',
+        tipo: camp.type || 'automatic',
+        presupuesto_diario: parseFloat(camp.daily_budget || 0),
+        fecha_creacion: camp.date_created || null,
+        fecha_sync: new Date().toISOString()
+      }, { onConflict: 'campaign_id' })
+
+      if (!error) campanasGuardadas++
+    }
+
+    // PASO 4: Obtener métricas diarias por item
+    const metricsFields = 'clicks,prints,ctr,cost,cpc,acos,roas,cvr,direct_units_quantity,direct_amount,indirect_units_quantity,indirect_amount,units_quantity,total_amount,organic_units_quantity,organic_units_amount'
+
+    const metricsUrl = `${ML_API_BASE}/advertising/advertisers/${advertiserId}/product_ads/campaigns?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}&aggregation_type=DAILY`
+
+    const metricsResponse = await fetch(metricsUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
+    })
+
+    let metricasGuardadas = 0
+
+    if (metricsResponse.ok) {
+      const metricsData = await metricsResponse.json()
+      const results = metricsData.results || []
+
+      // Obtener mapa SKU desde publicaciones_meli
+      const { data: pubsData } = await supabase
+        .from('publicaciones_meli')
+        .select('id_publicacion, sku')
+        .not('sku', 'is', null)
+
+      const skuMap: { [key: string]: string } = {}
+      if (pubsData) {
+        for (const p of pubsData) {
+          skuMap[p.id_publicacion] = p.sku
+        }
+      }
+
+      // Procesar resultados diarios
+      for (const dia of results) {
+        const fecha = dia.date
+        if (!fecha) continue
+
+        // Si los datos vienen agrupados por campaña, iterar items dentro
+        const items = dia.items || dia.ads || [dia]
+
+        for (const item of items) {
+          const itemId = item.item_id || item.id || null
+          if (!itemId && !item.cost) continue
+
+          const registro = {
+            fecha,
+            campaign_id: item.campaign_id ? String(item.campaign_id) : null,
+            item_id: itemId,
+            sku: itemId ? (skuMap[itemId] || null) : null,
+            impresiones: parseInt(item.prints || item.impressions || 0),
+            clicks: parseInt(item.clicks || 0),
+            ctr: parseFloat(item.ctr || 0),
+            costo: parseFloat(item.cost || 0),
+            cpc: parseFloat(item.cpc || 0),
+            ventas_directas_unidades: parseInt(item.direct_units_quantity || 0),
+            ventas_directas_monto: parseFloat(item.direct_amount || 0),
+            ventas_indirectas_unidades: parseInt(item.indirect_units_quantity || 0),
+            ventas_indirectas_monto: parseFloat(item.indirect_amount || 0),
+            ventas_total_unidades: parseInt(item.units_quantity || 0),
+            ventas_total_monto: parseFloat(item.total_amount || 0),
+            ventas_organicas_unidades: parseInt(item.organic_units_quantity || 0),
+            ventas_organicas_monto: parseFloat(item.organic_units_amount || 0),
+            acos: parseFloat(item.acos || 0),
+            roas: parseFloat(item.roas || 0),
+            cvr: parseFloat(item.cvr || 0)
+          }
+
+          const { error } = await supabase
+            .from('ads_metricas_diarias')
+            .upsert(registro, { onConflict: 'fecha,item_id' })
+
+          if (!error) metricasGuardadas++
+        }
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        campanas: campanasGuardadas,
+        metricas: metricasGuardadas,
+        fechaDesde: dateFrom,
+        fechaHasta: dateTo
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error en syncAdsDetailed:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
