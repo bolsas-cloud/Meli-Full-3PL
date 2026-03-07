@@ -181,14 +181,20 @@ export const moduloAds = {
                     .gte('fecha_orden', fechaDesdeStr)
             ]);
 
-            metricas = metricasRes.data || [];
+            const allMetricas = metricasRes.data || [];
             campanas = campanasRes.data || [];
             ventasTotales = (ordenesRes.data || []).reduce((sum, o) => sum + (parseFloat(o.precio_total) || 0), 0);
 
+            // Separar: items reales (para KPIs/tabla) vs datos diarios por campaña (para gráficos)
+            const metricasItems = allMetricas.filter(m => m.item_id && !m.item_id.startsWith('_CAMP_'));
+            const metricasDiarias = allMetricas.filter(m => m.item_id && m.item_id.startsWith('_CAMP_'));
+
             // Filtrar por campana
-            let metricasFiltradas = metricas;
+            let itemsFiltrados = metricasItems;
+            let diariasFiltradas = metricasDiarias;
             if (filtros.campaign !== 'todas') {
-                metricasFiltradas = metricas.filter(m => m.campaign_id === filtros.campaign);
+                itemsFiltrados = metricasItems.filter(m => m.campaign_id === filtros.campaign);
+                diariasFiltradas = metricasDiarias.filter(m => m.campaign_id === filtros.campaign);
             }
 
             // Llenar selector de campanas
@@ -198,10 +204,10 @@ export const moduloAds = {
                     campanas.map(c => `<option value="${c.campaign_id}" ${filtros.campaign === c.campaign_id ? 'selected' : ''}>${c.nombre || c.campaign_id}</option>`).join('');
             }
 
-            // Calcular KPIs
-            moduloAds.calcularKPIs(metricasFiltradas);
-            moduloAds.calcularResumenProductos(metricasFiltradas);
-            moduloAds.renderGraficos(metricasFiltradas);
+            // Calcular KPIs con items, gráficos con diarias
+            moduloAds.calcularKPIs(itemsFiltrados);
+            moduloAds.calcularResumenProductos(itemsFiltrados);
+            moduloAds.renderGraficos(diariasFiltradas);
             moduloAds.renderTablaProductos();
 
         } catch (error) {

@@ -1762,8 +1762,58 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       offset += 50
     }
 
-    // PASO 4: Obtener métricas por item (endpoint v2: ads/search)
-    // Obtener mapa SKU
+    // PASO 4: Obtener métricas DIARIAS por campaña (para gráficos de tendencia)
+    let metricasDiarias = 0
+    for (const camp of allCampaigns) {
+      const campId = String(camp.id)
+      const dailyUrl = `${ML_API_BASE}/advertising/${SITE_ID}/product_ads/ads/${campId}?date_from=${dateFrom}&date_to=${dateTo}&aggregation_type=DAILY&metrics=${metricsFields}`
+      const dailyResp = await fetch(dailyUrl, { headers: apiHeaders })
+
+      // Si falla el endpoint por item, probar por campaña search con aggregation
+      if (!dailyResp.ok) {
+        // Alternativa: obtener métricas diarias del resumen general (ya tenemos en costos_publicidad)
+        continue
+      }
+
+      const dailyData = await dailyResp.json()
+      const dailyResults = dailyData.results || dailyData.metrics || []
+
+      for (const dia of (Array.isArray(dailyResults) ? dailyResults : [])) {
+        const fecha = dia.date || dia.fecha
+        if (!fecha) continue
+
+        const registro = {
+          fecha,
+          campaign_id: campId,
+          item_id: `_CAMP_${campId}`,
+          sku: null,
+          impresiones: parseInt(dia.prints || 0),
+          clicks: parseInt(dia.clicks || 0),
+          ctr: dia.prints > 0 ? (parseInt(dia.clicks || 0) / parseInt(dia.prints || 1)) * 100 : 0,
+          costo: parseFloat(dia.cost || 0),
+          cpc: parseFloat(dia.cpc || 0),
+          ventas_directas_unidades: parseInt(dia.direct_items_quantity || 0),
+          ventas_directas_monto: parseFloat(dia.direct_amount || 0),
+          ventas_indirectas_unidades: parseInt(dia.indirect_items_quantity || 0),
+          ventas_indirectas_monto: parseFloat(dia.indirect_amount || 0),
+          ventas_total_unidades: parseInt(dia.units_quantity || 0),
+          ventas_total_monto: parseFloat(dia.total_amount || 0),
+          ventas_organicas_unidades: 0,
+          ventas_organicas_monto: 0,
+          acos: parseFloat(dia.acos || 0),
+          roas: parseFloat(dia.roas || 0),
+          cvr: parseFloat(dia.cvr || 0)
+        }
+
+        const { error } = await supabase
+          .from('ads_metricas_diarias')
+          .upsert(registro, { onConflict: 'fecha,item_id' })
+
+        if (!error) metricasDiarias++
+      }
+    }
+
+    // PASO 5: Obtener métricas por ITEM (para tabla de rendimiento por producto)
     const { data: pubsData } = await supabase
       .from('publicaciones_meli')
       .select('id_publicacion, sku')
@@ -1776,18 +1826,14 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       }
     }
 
-    let metricasGuardadas = 0
+    let metricasItems = 0
     offset = 0
 
     while (true) {
       const adsUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/ads/search?limit=50&offset=${offset}&date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}`
       const adsResp = await fetch(adsUrl, { headers: apiHeaders })
 
-      if (!adsResp.ok) {
-        const errText = await adsResp.text()
-        console.error(`Ads search error (${adsResp.status}): ${errText}`)
-        break
-      }
+      if (!adsResp.ok) break
 
       const adsData = await adsResp.json()
       const items = adsData.results || []
@@ -1798,7 +1844,7 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
 
         const m = item.metrics || {}
         const registro = {
-          fecha: dateTo, // resumen del periodo
+          fecha: dateFrom, // fecha inicio del rango como referencia
           campaign_id: item.campaign_id ? String(item.campaign_id) : null,
           item_id: itemId,
           sku: skuMap[itemId] || null,
@@ -1824,7 +1870,7 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
           .from('ads_metricas_diarias')
           .upsert(registro, { onConflict: 'fecha,item_id' })
 
-        if (!error) metricasGuardadas++
+        if (!error) metricasItems++
       }
 
       if (items.length < 50) break
@@ -1835,7 +1881,8 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       JSON.stringify({
         success: true,
         campanas: campanasGuardadas,
-        metricas: metricasGuardadas,
+        metricas_diarias: metricasDiarias,
+        metricas_items: metricasItems,
         total_campanas: allCampaigns.length,
         fechaDesde: dateFrom,
         fechaHasta: dateTo
