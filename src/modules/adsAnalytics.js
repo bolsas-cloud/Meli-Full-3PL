@@ -163,38 +163,39 @@ export const moduloAds = {
             fechaDesde.setDate(fechaDesde.getDate() - filtros.dias);
             const fechaDesdeStr = fechaDesde.toISOString().split('T')[0];
 
-            // Cargar metricas y campanas en paralelo
-            const [metricasRes, campanasRes, ordenesRes] = await Promise.all([
+            // Cargar metricas, campanas, costos diarios y ordenes en paralelo
+            const [metricasRes, campanasRes, costosRes, ordenesRes] = await Promise.all([
                 supabase
                     .from('ads_metricas_diarias')
                     .select('*')
-                    .gte('fecha', fechaDesdeStr)
+                    .not('item_id', 'like', '_CAMP_%')
                     .order('fecha'),
                 supabase
                     .from('ads_campanas')
                     .select('*')
                     .order('nombre'),
+                // Costos diarios para gráficos de tendencia
+                supabase
+                    .from('costos_publicidad')
+                    .select('fecha, costo_diario')
+                    .gte('fecha', fechaDesdeStr)
+                    .order('fecha'),
                 // Ventas totales para TACOS
                 supabase
                     .from('ordenes_meli')
-                    .select('precio_total')
-                    .gte('fecha_orden', fechaDesdeStr)
+                    .select('total_lista')
+                    .gte('fecha_creacion', fechaDesdeStr)
             ]);
 
-            const allMetricas = metricasRes.data || [];
+            const metricasItems = metricasRes.data || [];
             campanas = campanasRes.data || [];
-            ventasTotales = (ordenesRes.data || []).reduce((sum, o) => sum + (parseFloat(o.precio_total) || 0), 0);
-
-            // Separar: items reales (para KPIs/tabla) vs datos diarios por campaña (para gráficos)
-            const metricasItems = allMetricas.filter(m => m.item_id && !m.item_id.startsWith('_CAMP_'));
-            const metricasDiarias = allMetricas.filter(m => m.item_id && m.item_id.startsWith('_CAMP_'));
+            const costosDiarios = costosRes.data || [];
+            ventasTotales = (ordenesRes.data || []).reduce((sum, o) => sum + (parseFloat(o.total_lista) || 0), 0);
 
             // Filtrar por campana
             let itemsFiltrados = metricasItems;
-            let diariasFiltradas = metricasDiarias;
             if (filtros.campaign !== 'todas') {
                 itemsFiltrados = metricasItems.filter(m => m.campaign_id === filtros.campaign);
-                diariasFiltradas = metricasDiarias.filter(m => m.campaign_id === filtros.campaign);
             }
 
             // Llenar selector de campanas
@@ -204,10 +205,10 @@ export const moduloAds = {
                     campanas.map(c => `<option value="${c.campaign_id}" ${filtros.campaign === c.campaign_id ? 'selected' : ''}>${c.nombre || c.campaign_id}</option>`).join('');
             }
 
-            // Calcular KPIs con items, gráficos con diarias
+            // Calcular KPIs con items, gráficos con costos diarios
             moduloAds.calcularKPIs(itemsFiltrados);
             moduloAds.calcularResumenProductos(itemsFiltrados);
-            moduloAds.renderGraficos(diariasFiltradas);
+            moduloAds.renderGraficos(costosDiarios);
             moduloAds.renderTablaProductos();
 
         } catch (error) {
@@ -346,41 +347,26 @@ export const moduloAds = {
         `).join('');
     },
 
-    renderGraficos: (data) => {
-        // Grafico 1: Gasto vs Revenue diario
+    renderGraficos: (costosDiarios) => {
+        // Grafico 1: Gasto diario de ads (de costos_publicidad)
         const canvasGasto = document.getElementById('chart-ads-gasto');
         if (canvasGasto && window.Chart) {
             if (chartGastoInstance) chartGastoInstance.destroy();
 
-            // Agrupar por fecha
-            const porFecha = {};
-            data.forEach(m => {
-                if (!porFecha[m.fecha]) porFecha[m.fecha] = { gasto: 0, revenue: 0 };
-                porFecha[m.fecha].gasto += (m.costo || 0);
-                porFecha[m.fecha].revenue += (m.ventas_total_monto || 0);
-            });
+            const fechas = costosDiarios.map(c => c.fecha);
+            const gastos = costosDiarios.map(c => parseFloat(c.costo_diario) || 0);
 
-            const fechas = Object.keys(porFecha).sort();
             chartGastoInstance = new Chart(canvasGasto, {
                 type: 'line',
                 data: {
                     labels: fechas.map(f => { const d = new Date(f + 'T12:00:00'); return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }); }),
-                    datasets: [
-                        {
-                            label: 'Gasto Ads',
-                            data: fechas.map(f => porFecha[f].gasto),
-                            borderColor: 'rgb(239, 68, 68)',
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                            fill: true, tension: 0.3, pointRadius: 1
-                        },
-                        {
-                            label: 'Revenue Ads',
-                            data: fechas.map(f => porFecha[f].revenue),
-                            borderColor: 'rgb(34, 197, 94)',
-                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                            fill: true, tension: 0.3, pointRadius: 1
-                        }
-                    ]
+                    datasets: [{
+                        label: 'Gasto Ads Diario',
+                        data: gastos,
+                        borderColor: 'rgb(139, 92, 246)',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        fill: true, tension: 0.3, pointRadius: 1
+                    }]
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
@@ -397,19 +383,18 @@ export const moduloAds = {
         if (canvasTacos && window.Chart) {
             if (chartTacosInstance) chartTacosInstance.destroy();
 
-            // Agrupar por semana
+            // Agrupar costos por semana
             const porSemana = {};
-            data.forEach(m => {
-                const d = new Date(m.fecha + 'T12:00:00');
+            costosDiarios.forEach(c => {
+                const d = new Date(c.fecha + 'T12:00:00');
                 const inicioSemana = new Date(d);
                 inicioSemana.setDate(d.getDate() - d.getDay());
                 const key = inicioSemana.toISOString().split('T')[0];
-                if (!porSemana[key]) porSemana[key] = { gasto: 0 };
-                porSemana[key].gasto += (m.costo || 0);
+                if (!porSemana[key]) porSemana[key] = 0;
+                porSemana[key] += parseFloat(c.costo_diario) || 0;
             });
 
             const semanas = Object.keys(porSemana).sort();
-            // TACOS semanal = gasto semanal / (ventasTotales / cantidadSemanas)
             const ventasPorSemana = semanas.length > 0 ? ventasTotales / semanas.length : 0;
 
             chartTacosInstance = new Chart(canvasTacos, {
@@ -421,9 +406,9 @@ export const moduloAds = {
                     }),
                     datasets: [{
                         label: 'TACOS %',
-                        data: semanas.map(s => ventasPorSemana > 0 ? (porSemana[s].gasto / ventasPorSemana) * 100 : 0),
+                        data: semanas.map(s => ventasPorSemana > 0 ? (porSemana[s] / ventasPorSemana) * 100 : 0),
                         backgroundColor: semanas.map(s => {
-                            const tacos = ventasPorSemana > 0 ? (porSemana[s].gasto / ventasPorSemana) * 100 : 0;
+                            const tacos = ventasPorSemana > 0 ? (porSemana[s] / ventasPorSemana) * 100 : 0;
                             return tacos <= 15 ? 'rgba(34, 197, 94, 0.7)' : tacos <= 25 ? 'rgba(234, 179, 8, 0.7)' : 'rgba(239, 68, 68, 0.7)';
                         }),
                         borderRadius: 4
@@ -432,12 +417,7 @@ export const moduloAds = {
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false },
-                        annotation: {
-                            annotations: {
-                                line15: { type: 'line', yMin: 15, yMax: 15, borderColor: 'rgba(234, 179, 8, 0.5)', borderDash: [5, 5], label: { content: '15%', display: true, position: 'end' } }
-                            }
-                        }
+                        legend: { display: false }
                     },
                     scales: {
                         y: { ticks: { callback: (v) => `${v}%` }, beginAtZero: true }

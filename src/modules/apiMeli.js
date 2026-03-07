@@ -66,9 +66,9 @@ export const apiMeli = {
 
             const { data, error } = await supabase
                 .from('ordenes_meli')
-                .select('sku, cantidad, fecha_orden')
-                .gte('fecha_orden', fechaDesde.toISOString())
-                .order('fecha_orden', { ascending: false });
+                .select('sku, cantidad, fecha_creacion')
+                .gte('fecha_creacion', fechaDesde.toISOString())
+                .order('fecha_creacion', { ascending: false });
 
             if (error) throw error;
             return data || [];
@@ -91,7 +91,7 @@ export const apiMeli = {
                 ventasPorSku[v.sku] = { total: 0, dias: new Set() };
             }
             ventasPorSku[v.sku].total += v.cantidad;
-            ventasPorSku[v.sku].dias.add(v.fecha_orden.split('T')[0]);
+            ventasPorSku[v.sku].dias.add(v.fecha_creacion.split('T')[0]);
         });
 
         // Calcular promedio diario y desviación
@@ -103,7 +103,7 @@ export const apiMeli = {
             // Calcular ventas por día
             datos.dias.forEach(dia => {
                 const ventasDelDia = ventas
-                    .filter(v => v.sku === sku && v.fecha_orden.startsWith(dia))
+                    .filter(v => v.sku === sku && v.fecha_creacion.startsWith(dia))
                     .reduce((sum, v) => sum + v.cantidad, 0);
                 ventasPorDia.push(ventasDelDia);
             });

@@ -114,8 +114,8 @@ export const moduloPYL = {
             // Cargar ventas mensuales desde ordenes_meli
             const { data: ordenesData } = await supabase
                 .from('ordenes_meli')
-                .select('fecha_orden, precio_total')
-                .order('fecha_orden', { ascending: false });
+                .select('fecha_creacion, total_lista')
+                .order('fecha_creacion', { ascending: false });
 
             // Cargar costos publicidad diarios
             const { data: adsData } = await supabase
@@ -126,11 +126,11 @@ export const moduloPYL = {
             // Agrupar ventas por mes
             const ventasMensuales = {};
             (ordenesData || []).forEach(o => {
-                if (!o.fecha_orden) return;
-                const d = new Date(o.fecha_orden);
+                if (!o.fecha_creacion) return;
+                const d = new Date(o.fecha_creacion);
                 const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                 if (!ventasMensuales[key]) ventasMensuales[key] = 0;
-                ventasMensuales[key] += (parseFloat(o.precio_total) || 0);
+                ventasMensuales[key] += (parseFloat(o.total_lista) || 0);
             });
 
             // Agrupar ads por mes
