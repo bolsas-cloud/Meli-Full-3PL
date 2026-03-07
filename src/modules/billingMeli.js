@@ -45,7 +45,7 @@ export const moduloBilling = {
 
                 <!-- KPI Cards -->
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3" id="billing-kpis">
-                    ${['Total', 'Comisiones', 'Cargos Fijos', 'Envios', 'Publicidad', 'Impuestos', 'Reembolsos'].map(label => `
+                    ${['Total', 'Comisiones', 'Logística Full', 'Envios', 'Publicidad', 'Impuestos', 'Bonificaciones'].map(label => `
                         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                             <span class="text-xs font-medium text-gray-500">${label}</span>
                             <p class="text-lg font-bold text-gray-800 mt-1" id="kpi-billing-${label.toLowerCase().replace(' ', '_')}">-</p>
@@ -84,6 +84,75 @@ export const moduloBilling = {
                             </tbody>
                         </table>
                     </div>
+                </div>
+
+                <!-- Referencia de Tipos de Cargo ML -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <details class="group">
+                        <summary class="p-4 cursor-pointer flex items-center justify-between hover:bg-gray-50 transition-colors">
+                            <h3 class="text-sm font-bold text-gray-700"><i class="fas fa-info-circle mr-1 text-blue-500"></i> Referencia de Tipos de Cargo ML</h3>
+                            <i class="fas fa-chevron-down text-gray-400 group-open:rotate-180 transition-transform"></i>
+                        </summary>
+                        <div class="px-4 pb-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                                <div>
+                                    <h4 class="font-bold text-blue-700 mb-1">Comisiones de Venta</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CVFV</span> Comisión venta Full</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CVFF</span> Comisión venta Flex</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CVFN</span> Comisión venta Normal</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CPAC</span> Cargo por Asesoría Comercial</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-green-700 mb-1">Envíos</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFF</span> Cargo por Mercado Envíos</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CXD</span> Cargo envío cross-docking</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-purple-700 mb-1">Publicidad</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">PADS</span> Product Ads (campañas)</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-orange-700 mb-1">Logística Full</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFBA</span> Almacenamiento prolongado</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFCB</span> Servicio de colecta</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFWA</span> Servicio de almacenamiento</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFRS</span> Retiro o descarte stock</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CFPB</span> Incumplimiento envíos</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CESM</span> Mantenimiento eShop</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-red-700 mb-1">Impuestos y Percepciones</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CIVA</span> IVA Régimen General</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CIRE</span> IVA RG5319/2023</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">IIBB</span> IIBB Buenos Aires</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CGMV</span> IIBB CABA</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CIBT</span> IIBB Tucumán</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">IBCF</span> IIBB CABA (percep.)</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">IIBBME</span> IIBB Bs.As. ME</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-teal-700 mb-1">Bonificaciones (descuentos)</h4>
+                                    <ul class="space-y-0.5 text-gray-600">
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">BVFV</span> Bonif. venta Full</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">BVFF</span> Bonif. venta Flex</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">BFF</span> Bonif. cargo envío</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">BDSD</span> Anulación cargo devoluc.</li>
+                                        <li><span class="font-mono bg-gray-100 px-1 rounded">CDSD</span> Cargo por devolución</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
                 </div>
 
             </div>
@@ -146,11 +215,11 @@ export const moduloBilling = {
 
         setKPI('kpi-billing-total', p.total_general);
         setKPI('kpi-billing-comisiones', p.total_comisiones);
-        setKPI('kpi-billing-cargos_fijos', p.total_cargos_fijos);
+        setKPI('kpi-billing-logística_full', p.total_cargos_fijos);
         setKPI('kpi-billing-envios', p.total_envios);
         setKPI('kpi-billing-publicidad', p.total_publicidad);
         setKPI('kpi-billing-impuestos', p.total_impuestos);
-        setKPI('kpi-billing-reembolsos', p.total_reembolsos);
+        setKPI('kpi-billing-bonificaciones', p.total_reembolsos);
     },
 
     cargarDetalle: async (key) => {

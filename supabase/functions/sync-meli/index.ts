@@ -1414,7 +1414,7 @@ async function syncBilling(supabase: any, accessToken: string) {
   try {
     // PASO 1: Obtener periodos de facturación (últimos 12 meses)
     const periodsResponse = await fetch(
-      `${ML_API_BASE}/billing/integration/monthly/periods?document_type=BILL&group=ML`,
+      `${ML_API_BASE}/billing/integration/monthly/periods?document_type=BILL&group=ML&limit=12`,
       { headers: { 'Authorization': `Bearer ${accessToken}` } }
     )
 
@@ -1477,9 +1477,9 @@ async function syncBilling(supabase: any, accessToken: string) {
       // Intentar summary/details (desglose de charges y bonuses)
       // Probar múltiples variantes del endpoint
       const summaryUrls = [
-        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details?group=ML`,
-        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details`,
-        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary?group=ML`
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details?document_type=BILL&group=ML`,
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary/details?document_type=BILL`,
+        `${ML_API_BASE}/billing/integration/periods/key/${key}/summary?document_type=BILL&group=ML`
       ]
 
       let summaryOk = false
@@ -1496,36 +1496,45 @@ async function syncBilling(supabase: any, accessToken: string) {
             debugInfo.push({ key, url, response_keys: Object.keys(rawData), sample: JSON.stringify(rawData).substring(0, 1000) })
           }
 
-          // Parsear charges
+          // Parsear charges con códigos reales de ML
           const billIncludes = rawData.bill_includes || rawData
           const charges = billIncludes.charges || rawData.charges || rawData.items || []
+
+          // Clasificación por prefijo de tipo ML:
+          // Comisiones: CVFV, CVFF, CVFN, CPAC
+          // Envíos: CFF, CXD
+          // Publicidad: PADS
+          // Logística Full: CFBA, CFCB, CFRS, CFWA, CFPB (almacenamiento, colecta, retiro, etc)
+          // Impuestos: CIVA, CIRE, CGMV, CIBT, IIBB*, IB*, CB*
+          // Otros: CESM, CDSD
+          // Bonificaciones: BVFV, BVFF, BFF, BDSD (negativos)
+          const comisionTipos = ['CVFV', 'CVFF', 'CVFN', 'CPAC']
+          const envioTipos = ['CFF', 'CXD']
+          const publiTipos = ['PADS']
+          const fullTipos = ['CFBA', 'CFCB', 'CFRS', 'CFWA', 'CFPB']
+          const impuestoTipos = ['CIVA', 'CIRE', 'CGMV', 'CIBT']
+          const bonifTipos = ['BVFV', 'BVFF', 'BFF', 'BDSD']
+
           if (Array.isArray(charges)) {
             for (const charge of charges) {
               const tipo = (charge.type || '').toUpperCase()
-              const label = (charge.label || charge.description || '').toLowerCase()
               const monto = parseFloat(charge.amount || 0)
 
-              if (tipo === 'CV' || label.includes('comisi') || label.includes('sale')) {
+              if (comisionTipos.includes(tipo)) {
                 totales.comisiones += monto
-              } else if (tipo === 'CXD' || label.includes('envío') || label.includes('envio') || label.includes('shipping') || label.includes('flete')) {
+              } else if (envioTipos.includes(tipo)) {
                 totales.envios += monto
-              } else if (tipo === 'PADS' || label.includes('publicidad') || label.includes('advertising') || label.includes('product ads')) {
+              } else if (publiTipos.includes(tipo)) {
                 totales.publicidad += monto
-              } else if (label.includes('impuesto') || label.includes('tax') || label.includes('percepcion') || label.includes('retencion') || label.includes('iva') || label.includes('iibb')) {
-                totales.impuestos += monto
-              } else if (label.includes('cargo fijo') || label.includes('fixed')) {
+              } else if (fullTipos.includes(tipo)) {
                 totales.cargos_fijos += monto
+              } else if (impuestoTipos.includes(tipo) || tipo.startsWith('IB') || tipo.startsWith('IIBB') || tipo.startsWith('CB')) {
+                totales.impuestos += monto
+              } else if (bonifTipos.includes(tipo)) {
+                totales.reembolsos += monto
               } else {
                 totales.otros += monto
               }
-            }
-          }
-
-          // Bonificaciones
-          const bonuses = billIncludes.bonuses || rawData.bonuses || []
-          if (Array.isArray(bonuses)) {
-            for (const bonus of bonuses) {
-              totales.reembolsos += parseFloat(bonus.amount || 0)
             }
           }
 
