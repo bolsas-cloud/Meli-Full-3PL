@@ -164,24 +164,26 @@ export const moduloAds = {
             fechaDesde.setDate(fechaDesde.getDate() - filtros.dias);
             const fechaDesdeStr = fechaDesde.toISOString().split('T')[0];
 
-            // Cargar metricas, campanas, costos diarios y ordenes en paralelo
+            // Todo filtrado por periodo seleccionado
             const [metricasRes, campanasRes, costosRes, ordenesRes] = await Promise.all([
+                // Metricas per-item filtradas por fecha del periodo
                 supabase
                     .from('ads_metricas_diarias')
                     .select('*')
                     .not('item_id', 'like', '_CAMP_%')
+                    .gte('fecha', fechaDesdeStr)
                     .order('fecha'),
                 supabase
                     .from('ads_campanas')
                     .select('*')
                     .order('nombre'),
-                // Costos diarios para gráficos de tendencia
+                // Costos diarios filtrados por periodo (para graficos)
                 supabase
                     .from('costos_publicidad')
                     .select('fecha, costo_diario')
                     .gte('fecha', fechaDesdeStr)
                     .order('fecha'),
-                // Ventas totales para TACOS
+                // Ventas totales filtradas por periodo (para TACOS)
                 supabase
                     .from('ordenes_meli')
                     .select('total_lista')
@@ -206,13 +208,15 @@ export const moduloAds = {
                     campanas.map(c => `<option value="${c.campaign_id}" ${filtros.campaign === c.campaign_id ? 'selected' : ''}>${c.nombre || c.campaign_id}</option>`).join('');
             }
 
-            // Calcular KPIs con items, gráficos con costos diarios
+            // KPIs y tabla usan datos per-item filtrados por periodo
             moduloAds.calcularKPIs(itemsFiltrados);
             moduloAds.calcularResumenProductos(itemsFiltrados);
-            // Mostrar rango de datos
+
+            // Mostrar rango
             const rangoEl = document.getElementById('ads-kpi-rango');
-            if (rangoEl && itemsFiltrados.length > 0) {
-                rangoEl.textContent = `KPIs y tabla: datos del último sync (últimos 90 días) · Gráficos: últimos ${filtros.dias} días`;
+            if (rangoEl) {
+                const fechasUnicas = [...new Set(metricasItems.map(m => m.fecha))];
+                rangoEl.textContent = `Ultimos ${filtros.dias} dias · ${fechasUnicas.length} dias con datos · ${metricasItems.length} registros`;
             }
 
             moduloAds.renderGraficos(costosDiarios);
@@ -452,7 +456,7 @@ export const moduloAds = {
             if (error) throw error;
 
             if (data?.success) {
-                mostrarNotificacion(`Ads sincronizado: ${data.campanas} campanas, ${data.metricas} metricas`, 'success');
+                mostrarNotificacion(`Ads sincronizado: ${data.campanas || 0} campanas, ${data.metricas_items || 0} items, ${data.dias_procesados || 0} dias`, 'success');
                 await moduloAds.cargarDatos();
             } else {
                 mostrarNotificacion(data?.error || 'Error al sincronizar ads', 'error');

@@ -106,6 +106,9 @@ serve(async (req) => {
       case 'sync-ads-detailed':
         return await syncAdsDetailed(supabase, accessToken)
 
+      case 'sync-ads-daily':
+        return await syncAdsDaily(supabase, accessToken)
+
       case 'sync-billing':
         return await syncBilling(supabase, accessToken)
 
@@ -1660,89 +1663,143 @@ async function syncBilling(supabase: any, accessToken: string) {
 // Expande el syncAds básico (solo costo diario) con métricas detalladas
 // Endpoint: /advertising/advertisers/$ID/product_ads/campaigns?metrics=...&aggregation_type=DAILY
 // ============================================
-async function syncAdsDetailed(supabase: any, accessToken: string) {
-  try {
-    const SITE_ID = 'MLA'
+// Helper: obtener advertiser ID (cachea en config_meli)
+async function getAdvertiserId(supabase: any, accessToken: string): Promise<string | null> {
+  const { data: cached } = await supabase
+    .from('config_meli')
+    .select('valor')
+    .eq('clave', 'advertiser_id')
+    .single()
 
-    // PASO 1: Obtener Advertiser ID
-    const { data: cachedAdvertiser } = await supabase
-      .from('config_meli')
-      .select('valor')
-      .eq('clave', 'advertiser_id')
-      .single()
+  if (cached?.valor) return cached.valor
 
-    let advertiserId = cachedAdvertiser?.valor
+  const resp = await fetch(
+    `${ML_API_BASE}/advertising/advertisers?product_id=PADS`,
+    { headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '1' } }
+  )
 
-    if (!advertiserId) {
-      const advertiserResponse = await fetch(
-        `${ML_API_BASE}/advertising/advertisers?product_id=PADS`,
-        { headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '1' } }
-      )
+  if (!resp.ok) return null
 
-      if (!advertiserResponse.ok) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'No se pudo obtener advertiser_id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+  const data = await resp.json()
+  const advId = data.advertisers?.[0]?.advertiser_id
+  if (advId) {
+    await supabase.from('config_meli')
+      .upsert({ clave: 'advertiser_id', valor: String(advId) }, { onConflict: 'clave' })
+    return String(advId)
+  }
+  return null
+}
+
+// Helper: obtener métricas por item para UN DIA y guardarlas
+async function fetchAndStoreAdsForDay(
+  supabase: any, accessToken: string, advertiserId: string,
+  fecha: string, skuMap: { [key: string]: string }
+): Promise<number> {
+  const SITE_ID = 'MLA'
+  const metricsFields = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,direct_items_quantity,indirect_items_quantity,units_quantity'
+  const apiHeaders = { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
+
+  let metricasItems = 0
+  let offset = 0
+
+  while (true) {
+    const adsUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/ads/search?limit=50&offset=${offset}&date_from=${fecha}&date_to=${fecha}&metrics=${metricsFields}`
+    const adsResp = await fetch(adsUrl, { headers: apiHeaders })
+
+    if (!adsResp.ok) break
+
+    const adsData = await adsResp.json()
+    const items = adsData.results || []
+
+    for (const item of items) {
+      const itemId = item.item_id || null
+      if (!itemId) continue
+
+      const m = item.metrics || {}
+      const registro = {
+        fecha: fecha,
+        campaign_id: item.campaign_id ? String(item.campaign_id) : null,
+        item_id: itemId,
+        sku: skuMap[itemId] || null,
+        impresiones: parseInt(m.prints || 0),
+        clicks: parseInt(m.clicks || 0),
+        ctr: m.prints > 0 ? (parseInt(m.clicks || 0) / parseInt(m.prints || 1)) * 100 : 0,
+        costo: parseFloat(m.cost || 0),
+        cpc: parseFloat(m.cpc || 0),
+        ventas_directas_unidades: parseInt(m.direct_items_quantity || 0),
+        ventas_directas_monto: parseFloat(m.direct_amount || 0),
+        ventas_indirectas_unidades: parseInt(m.indirect_items_quantity || 0),
+        ventas_indirectas_monto: parseFloat(m.indirect_amount || 0),
+        ventas_total_unidades: parseInt(m.units_quantity || 0),
+        ventas_total_monto: parseFloat(m.total_amount || 0),
+        ventas_organicas_unidades: 0,
+        ventas_organicas_monto: 0,
+        acos: parseFloat(m.acos || 0),
+        roas: parseFloat(m.roas || 0),
+        cvr: parseFloat(m.cvr || 0)
       }
 
-      const advertiserData = await advertiserResponse.json()
-      if (advertiserData.advertisers?.[0]?.advertiser_id) {
-        advertiserId = advertiserData.advertisers[0].advertiser_id
-        await supabase.from('config_meli')
-          .upsert({ clave: 'advertiser_id', valor: String(advertiserId) }, { onConflict: 'clave' })
-      } else {
-        return new Response(
-          JSON.stringify({ success: false, error: 'No se encontró advertiser_id' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+      const { error } = await supabase
+        .from('ads_metricas_diarias')
+        .upsert(registro, { onConflict: 'fecha,item_id' })
+
+      if (!error) metricasItems++
     }
 
-    // PASO 2: Determinar rango de fechas (incremental, máx 90 días)
-    const hoy = new Date()
-    let fechaDesde: Date
+    if (items.length < 50) break
+    offset += 50
+  }
 
+  return metricasItems
+}
+
+// Sync completo: backfill día por día los días que faltan (máx 90 días)
+async function syncAdsDetailed(supabase: any, accessToken: string) {
+  try {
+    const advertiserId = await getAdvertiserId(supabase, accessToken)
+    if (!advertiserId) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'No se pudo obtener advertiser_id' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const SITE_ID = 'MLA'
+    const metricsFields = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,direct_items_quantity,indirect_items_quantity,units_quantity'
+    const apiHeaders = { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
+
+    // Determinar rango: desde última fecha guardada (o 90 días atrás)
+    const hoy = new Date()
     const { data: ultimaMetrica } = await supabase
       .from('ads_metricas_diarias')
       .select('fecha')
-      .not('item_id', 'is', null)
+      .not('item_id', 'like', '_CAMP_%')
       .order('fecha', { ascending: false })
       .limit(1)
       .single()
 
+    let fechaDesde: Date
     if (ultimaMetrica?.fecha) {
-      fechaDesde = new Date(ultimaMetrica.fecha)
-      fechaDesde.setDate(fechaDesde.getDate() - 3) // 3 días de margen por delay ML
+      fechaDesde = new Date(ultimaMetrica.fecha + 'T12:00:00')
+      // Re-sync último día guardado + días nuevos
     } else {
-      fechaDesde = new Date()
+      fechaDesde = new Date(hoy)
       fechaDesde.setDate(hoy.getDate() - 89)
     }
 
-    const dateFrom = fechaDesde.toISOString().split('T')[0]
-    const dateTo = hoy.toISOString().split('T')[0]
+    // Campañas (rango completo para tener datos actualizados)
+    const dateFromStr = fechaDesde.toISOString().split('T')[0]
+    const dateToStr = hoy.toISOString().split('T')[0]
 
-    const metricsFields = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,direct_items_quantity,indirect_items_quantity,units_quantity'
-    const apiHeaders = { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' }
-
-    // PASO 3: Obtener campañas con métricas (endpoint v2: campaigns/search)
     let campanasGuardadas = 0
     let offset = 0
-    const allCampaigns: any[] = []
-
     while (true) {
-      const campUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=50&offset=${offset}&date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}`
+      const campUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=50&offset=${offset}&date_from=${dateFromStr}&date_to=${dateToStr}&metrics=${metricsFields}`
       const campResp = await fetch(campUrl, { headers: apiHeaders })
-
-      if (!campResp.ok) {
-        const errText = await campResp.text()
-        console.error(`Campaigns error (${campResp.status}): ${errText}`)
-        break
-      }
+      if (!campResp.ok) break
 
       const campData = await campResp.json()
       const results = campData.results || []
-      allCampaigns.push(...results)
 
       for (const camp of results) {
         const { error } = await supabase.from('ads_campanas').upsert({
@@ -1754,7 +1811,6 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
           fecha_creacion: camp.date_created || null,
           fecha_sync: new Date().toISOString()
         }, { onConflict: 'campaign_id' })
-
         if (!error) campanasGuardadas++
       }
 
@@ -1762,9 +1818,7 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       offset += 50
     }
 
-    // PASO 4: Gráficos diarios ya usan tabla costos_publicidad (syncAds básico)
-
-    // PASO 5: Obtener métricas por ITEM (para tabla de rendimiento por producto)
+    // SKU map
     const { data: pubsData } = await supabase
       .from('publicaciones_meli')
       .select('id_publicacion, sku')
@@ -1777,74 +1831,94 @@ async function syncAdsDetailed(supabase: any, accessToken: string) {
       }
     }
 
-    // Borrar items anteriores (se reemplazan con datos frescos del rango completo)
-    await supabase.from('ads_metricas_diarias').delete().not('item_id', 'like', '_CAMP_%')
+    // Limpiar datos agregados antiguos (los que tienen todos la misma fecha)
+    // Solo si es primera vez con backfill diario
+    if (!ultimaMetrica?.fecha) {
+      await supabase.from('ads_metricas_diarias').delete().not('item_id', 'like', '_CAMP_%')
+    }
 
-    let metricasItems = 0
-    offset = 0
+    // Iterar día por día desde fechaDesde hasta ayer (hoy puede no tener datos completos)
+    const ayer = new Date(hoy)
+    ayer.setDate(hoy.getDate() - 1)
 
-    while (true) {
-      const adsUrl = `${ML_API_BASE}/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/ads/search?limit=50&offset=${offset}&date_from=${dateFrom}&date_to=${dateTo}&metrics=${metricsFields}`
-      const adsResp = await fetch(adsUrl, { headers: apiHeaders })
+    let totalItems = 0
+    let diasProcesados = 0
+    const cursor = new Date(fechaDesde)
 
-      if (!adsResp.ok) break
-
-      const adsData = await adsResp.json()
-      const items = adsData.results || []
-
-      for (const item of items) {
-        const itemId = item.item_id || null
-        if (!itemId) continue
-
-        const m = item.metrics || {}
-        const registro = {
-          fecha: dateTo, // fecha del sync como referencia
-          campaign_id: item.campaign_id ? String(item.campaign_id) : null,
-          item_id: itemId,
-          sku: skuMap[itemId] || null,
-          impresiones: parseInt(m.prints || 0),
-          clicks: parseInt(m.clicks || 0),
-          ctr: m.prints > 0 ? (parseInt(m.clicks || 0) / parseInt(m.prints || 1)) * 100 : 0,
-          costo: parseFloat(m.cost || 0),
-          cpc: parseFloat(m.cpc || 0),
-          ventas_directas_unidades: parseInt(m.direct_items_quantity || 0),
-          ventas_directas_monto: parseFloat(m.direct_amount || 0),
-          ventas_indirectas_unidades: parseInt(m.indirect_items_quantity || 0),
-          ventas_indirectas_monto: parseFloat(m.indirect_amount || 0),
-          ventas_total_unidades: parseInt(m.units_quantity || 0),
-          ventas_total_monto: parseFloat(m.total_amount || 0),
-          ventas_organicas_unidades: 0,
-          ventas_organicas_monto: 0,
-          acos: parseFloat(m.acos || 0),
-          roas: parseFloat(m.roas || 0),
-          cvr: parseFloat(m.cvr || 0)
-        }
-
-        const { error } = await supabase
-          .from('ads_metricas_diarias')
-          .upsert(registro, { onConflict: 'fecha,item_id' })
-
-        if (!error) metricasItems++
-      }
-
-      if (items.length < 50) break
-      offset += 50
+    while (cursor <= ayer) {
+      const diaStr = cursor.toISOString().split('T')[0]
+      const items = await fetchAndStoreAdsForDay(supabase, accessToken, advertiserId, diaStr, skuMap)
+      totalItems += items
+      diasProcesados++
+      cursor.setDate(cursor.getDate() + 1)
     }
 
     return new Response(
       JSON.stringify({
         success: true,
         campanas: campanasGuardadas,
-        metricas_items: metricasItems,
-        total_campanas: allCampaigns.length,
-        fechaDesde: dateFrom,
-        fechaHasta: dateTo
+        metricas_items: totalItems,
+        dias_procesados: diasProcesados,
+        fechaDesde: dateFromStr,
+        fechaHasta: ayer.toISOString().split('T')[0]
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
     console.error('Error en syncAdsDetailed:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Sync diario: solo últimos 2 días (para delay ML)
+async function syncAdsDaily(supabase: any, accessToken: string) {
+  try {
+    const advertiserId = await getAdvertiserId(supabase, accessToken)
+    if (!advertiserId) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'No se pudo obtener advertiser_id' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const { data: pubsData } = await supabase
+      .from('publicaciones_meli')
+      .select('id_publicacion, sku')
+      .not('sku', 'is', null)
+
+    const skuMap: { [key: string]: string } = {}
+    if (pubsData) {
+      for (const p of pubsData) {
+        skuMap[p.id_publicacion] = p.sku
+      }
+    }
+
+    const hoy = new Date()
+    let totalItems = 0
+
+    // Sync ayer y anteayer (por delay de ML)
+    for (let i = 1; i <= 2; i++) {
+      const dia = new Date(hoy)
+      dia.setDate(hoy.getDate() - i)
+      const diaStr = dia.toISOString().split('T')[0]
+      totalItems += await fetchAndStoreAdsForDay(supabase, accessToken, advertiserId, diaStr, skuMap)
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        metricas_items: totalItems,
+        dias: 2
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error en syncAdsDaily:', error)
     return new Response(
       JSON.stringify({ success: false, error: (error as Error).message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
