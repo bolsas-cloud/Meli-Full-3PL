@@ -123,12 +123,12 @@ export const moduloPYL = {
                 .select('fecha, costo_diario')
                 .order('fecha', { ascending: false });
 
-            // Agrupar ventas por mes
+            // Agrupar ventas por mes (usar UTC para evitar desfase de timezone)
             const ventasMensuales = {};
             (ordenesData || []).forEach(o => {
                 if (!o.fecha_creacion) return;
                 const d = new Date(o.fecha_creacion);
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
                 if (!ventasMensuales[key]) ventasMensuales[key] = 0;
                 ventasMensuales[key] += (parseFloat(o.total_lista) || 0);
             });
@@ -165,13 +165,14 @@ export const moduloPYL = {
                 const totalCostos = comisiones + cargosFijos + envios + publicidad + impuestos;
                 const margen = ventas - totalCostos;
                 const pctMargen = ventas > 0 ? (margen / ventas) * 100 : 0;
+                const tieneCostos = comisiones > 0 || envios > 0 || cargosFijos > 0 || impuestos > 0;
 
                 return {
                     key, anio: parseInt(anio), mes: parseInt(mes),
                     ventas, comisiones, cargosFijos, envios, publicidad, impuestos,
-                    totalCostos, margen, pctMargen
+                    totalCostos, margen, pctMargen, tieneCostos
                 };
-            });
+            }).filter(d => d.ventas > 0 || d.tieneCostos);
 
             // Llenar selector de meses
             const sel = document.getElementById('sel-mes-pyl');
@@ -228,7 +229,15 @@ export const moduloPYL = {
 
         const fmt = (n) => Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-        body.innerHTML = datosMensuales.map(d => {
+        // Solo mostrar meses con datos de costos (billing con desglose)
+        const mesesConDatos = datosMensuales.filter(d => d.tieneCostos);
+
+        if (mesesConDatos.length === 0) {
+            body.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">Sincroniza Billing ML para ver el P&L</td></tr>';
+            return;
+        }
+
+        body.innerHTML = mesesConDatos.map(d => {
             const mesNombre = new Date(d.anio, d.mes - 1).toLocaleString('es-AR', { month: 'short' });
             return `
                 <tr class="hover:bg-gray-50 cursor-pointer" onclick="moduloPYL.cambiarMes('${d.key}'); document.getElementById('sel-mes-pyl').value='${d.key}'">
@@ -252,7 +261,7 @@ export const moduloPYL = {
 
         if (chartInstance) chartInstance.destroy();
 
-        const ultimos = [...datosMensuales].reverse().slice(-6);
+        const ultimos = [...datosMensuales].filter(d => d.tieneCostos).reverse().slice(-6);
         const labels = ultimos.map(d => {
             const mesNombre = new Date(d.anio, d.mes - 1).toLocaleString('es-AR', { month: 'short' });
             return `${mesNombre} ${d.anio}`;
