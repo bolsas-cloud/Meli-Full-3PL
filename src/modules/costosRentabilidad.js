@@ -106,7 +106,13 @@ export const moduloCostos = {
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="p-4 border-b border-gray-200 flex items-center justify-between">
                         <h3 class="text-sm font-bold text-gray-700">Rentabilidad por Publicacion</h3>
-                        <span class="text-xs text-gray-400" id="costos-count"></span>
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs text-gray-400" id="costos-count"></span>
+                            <button onclick="moduloCostos.generarPDF()"
+                                    class="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors">
+                                <i class="fas fa-file-pdf mr-1"></i> PDF
+                            </button>
+                        </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="min-w-full">
@@ -573,6 +579,141 @@ export const moduloCostos = {
                 </tr>
             `;
         }).join('');
+    },
+
+    generarPDF: () => {
+        const items = publicaciones.filter(p => {
+            if (!filtroBusqueda) return true;
+            return p.sku.toLowerCase().includes(filtroBusqueda) ||
+                   p.titulo.toLowerCase().includes(filtroBusqueda);
+        });
+
+        if (items.length === 0) {
+            mostrarNotificacion('Sin datos para generar PDF', 'warning');
+            return;
+        }
+
+        // Ordenar igual que la tabla
+        items.sort((a, b) => {
+            let va = a[sortCol], vb = b[sortCol];
+            if (typeof va === 'string') va = va.toLowerCase();
+            if (typeof vb === 'string') vb = vb.toLowerCase();
+            if (va < vb) return sortAsc ? -1 : 1;
+            if (va > vb) return sortAsc ? 1 : -1;
+            return 0;
+        });
+
+        const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const fmt = (n) => Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+        const conCosto = items.filter(p => p.costo > 0);
+        const margenProm = conCosto.length > 0
+            ? (conCosto.reduce((s, p) => s + p.margen_pct, 0) / conCosto.length).toFixed(1)
+            : '0';
+
+        const V = (configCalc.pctComision + configCalc.pctPublicidad +
+                   configCalc.pctPromocion + configCalc.pctImpuestos).toFixed(1);
+
+        const ventana = window.open('', '_blank');
+        ventana.document.write(`<!DOCTYPE html>
+<html><head>
+<title>Costos y Rentabilidad - ${fecha}</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9px; color: #333; padding: 15px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #7c3aed; padding-bottom: 10px; margin-bottom: 12px; }
+    .header h1 { font-size: 16px; color: #7c3aed; }
+    .header-info { font-size: 9px; color: #666; text-align: right; }
+    .params { display: flex; gap: 16px; margin-bottom: 10px; font-size: 9px; color: #555; }
+    .params span { background: #f5f3ff; padding: 2px 8px; border-radius: 4px; }
+    .summary { display: flex; gap: 20px; margin-bottom: 12px; font-size: 10px; }
+    .summary div { background: #fafafa; padding: 6px 12px; border-radius: 6px; border: 1px solid #e5e7eb; }
+    .summary .label { font-size: 8px; color: #888; text-transform: uppercase; }
+    .summary .value { font-weight: 700; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f8fafc; padding: 5px 6px; text-align: right; font-size: 7.5px; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; letter-spacing: 0.3px; }
+    th:first-child { text-align: left; }
+    td { padding: 4px 6px; border-bottom: 1px solid #f1f5f9; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    td:first-child { text-align: left; }
+    .sku { font-family: 'Consolas', monospace; font-size: 7px; color: #94a3b8; }
+    .producto { font-size: 8.5px; font-weight: 500; }
+    .positive { color: #16a34a; } .negative { color: #dc2626; } .amber { color: #d97706; } .purple { color: #7c3aed; }
+    .sin-costo { color: #cbd5e1; font-style: italic; }
+    .sugerido-up { color: #dc2626; font-weight: 600; }
+    .sugerido-ok { color: #16a34a; }
+    .no-print { margin-top: 16px; text-align: center; }
+    @media print { .no-print { display: none !important; } body { padding: 8px; } @page { size: landscape; margin: 8mm; } }
+</style>
+</head><body>
+<div class="header">
+    <div>
+        <h1>Costos y Rentabilidad ML</h1>
+        <p style="color:#64748b; margin-top:3px; font-size:10px;">Analisis de margenes y precios sugeridos</p>
+    </div>
+    <div class="header-info">
+        <div>${fecha}</div>
+        <div>${items.length} publicaciones</div>
+    </div>
+</div>
+<div class="params">
+    <span>Comision: ${configCalc.pctComision}%</span>
+    <span>Publi: ${configCalc.pctPublicidad}%</span>
+    <span>Promo: ${configCalc.pctPromocion}%</span>
+    <span>Imp: ${configCalc.pctImpuestos}%</span>
+    <span>Margen obj: ${configCalc.margenObjetivo}% s/costo</span>
+    <span><b>V = ${V}%</b></span>
+</div>
+<div class="summary">
+    <div><div class="label">Con costo</div><div class="value">${conCosto.length}</div></div>
+    <div><div class="label">Sin costo</div><div class="value negative">${items.length - conCosto.length}</div></div>
+    <div><div class="label">Margen prom. s/costo</div><div class="value ${parseFloat(margenProm) >= configCalc.margenObjetivo ? 'positive' : 'amber'}">${margenProm}%</div></div>
+</div>
+<table>
+    <thead><tr>
+        <th style="text-align:left; min-width:200px;">Producto</th>
+        <th>Precio ML</th>
+        <th>Costo</th>
+        <th>Comision</th>
+        <th>C.Fijo</th>
+        <th>Envio</th>
+        <th>Imp.</th>
+        <th>Publi</th>
+        <th>Margen $</th>
+        <th>% s/C</th>
+        <th>Sugerido</th>
+    </tr></thead>
+    <tbody>
+${items.map(p => {
+    const margenClass = p.costo === 0 ? 'sin-costo'
+        : p.margen_pct >= configCalc.margenObjetivo ? 'positive'
+        : p.margen_pct >= 10 ? 'amber' : 'negative';
+    const costoTxt = p.costo > 0 ? `$ ${fmt(p.costo)}` : '<span class="sin-costo">sin costo</span>';
+    const sugeridoTxt = p.precio_sugerido
+        ? `<span class="${p.precio_sugerido > p.precio ? 'sugerido-up' : 'sugerido-ok'}">$ ${fmt(p.precio_sugerido)}</span>`
+        : '-';
+    const tag = p.costoOrigen === 'calculado' ? ' <span style="font-size:6px;color:#60a5fa;">calc</span>' : '';
+    return `<tr>
+        <td style="text-align:left"><div class="producto">${p.titulo}</div><div class="sku">${p.sku}${tag}</div></td>
+        <td style="font-weight:600">$ ${fmt(p.precio)}</td>
+        <td>${costoTxt}</td>
+        <td class="negative">$ ${fmt(p.comision_ml)}</td>
+        <td>${p.cargo_fijo > 0 ? '$ ' + fmt(p.cargo_fijo) : '-'}</td>
+        <td class="amber">${p.envio > 0 ? '$ ' + fmt(p.envio) : '-'}</td>
+        <td>${p.impuestos > 0 ? '$ ' + fmt(p.impuestos) : '-'}</td>
+        <td class="purple">$ ${fmt(p.publi_est)}</td>
+        <td class="${margenClass}" style="font-weight:600">$ ${fmt(p.margen)}</td>
+        <td class="${margenClass}" style="font-weight:700">${p.costo > 0 ? p.margen_pct.toFixed(1) + '%' : '-'}</td>
+        <td>${sugeridoTxt}</td>
+    </tr>`;
+}).join('')}
+    </tbody>
+</table>
+<p style="margin-top:10px; font-size:8px; color:#94a3b8;">* Formula: P = (C*(1+m) + cf/E) / (1-V). Margen calculado sobre costo de produccion. Costos de ProduccionTextilApp.</p>
+<div class="no-print">
+    <button onclick="window.print()" style="padding:8px 24px; background:#7c3aed; color:white; border:none; border-radius:6px; font-size:13px; cursor:pointer;">Imprimir / Guardar PDF</button>
+</div>
+</body></html>`);
+        ventana.document.close();
     },
 
     // Calcular costo fijo segun precio (desde config_costos_fijos_ml)
