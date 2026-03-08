@@ -112,22 +112,21 @@ export const moduloCostos = {
                         <table class="min-w-full">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('sku')">SKU</th>
-                                    <th class="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('titulo')">Producto</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('precio')">Precio ML</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('costo')">Costo Prod</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('comision_ml')">Comision</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('cargo_fijo')">Cargo Fijo</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('envio')">Envio</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('impuestos')">Impuestos</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('publi_est')">Publi est.</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('margen')">Margen $</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('margen_pct')">Margen %s/C</th>
-                                    <th class="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase">Sugerido</th>
+                                    <th class="px-3 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('titulo')">Producto</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('precio')">Precio ML</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('costo')">Costo</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('comision_ml')">Comision</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('cargo_fijo')">C.Fijo</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('envio')">Envio</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('impuestos')">Imp.</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('publi_est')">Publi</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('margen')">Margen $</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100" onclick="moduloCostos.ordenar('margen_pct')">% s/C</th>
+                                    <th class="px-3 py-2.5 text-right text-[10px] font-bold text-gray-500 uppercase">Sugerido</th>
                                 </tr>
                             </thead>
                             <tbody id="costos-tabla-body" class="divide-y divide-gray-100">
-                                <tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Cargando...</td></tr>
+                                <tr><td colspan="11" class="px-4 py-8 text-center text-gray-400">Cargando...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -525,7 +524,7 @@ export const moduloCostos = {
         document.querySelectorAll('#costos-tabla-body')?.closest?.('table')?.querySelectorAll?.('th');
 
         if (items.length === 0) {
-            body.innerHTML = '<tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>';
+            body.innerHTML = '<tr><td colspan="11" class="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>';
             return;
         }
 
@@ -556,19 +555,21 @@ export const moduloCostos = {
                 : '';
 
             return `
-                <tr class="hover:bg-gray-50 text-xs">
-                    <td class="px-3 py-2 font-mono text-[10px] text-gray-600">${p.sku}</td>
-                    <td class="px-3 py-2 text-gray-800 max-w-[200px] truncate" title="${p.titulo}">${p.titulo.substring(0, 45)}${p.titulo.length > 45 ? '...' : ''}</td>
-                    <td class="px-3 py-2 text-right font-medium">$ ${fmt(p.precio)}</td>
-                    <td class="px-3 py-2 text-right">${costoDisplay}${costoTag}</td>
-                    <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.comision_ml)}</td>
-                    <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.cargo_fijo)}</td>
-                    <td class="px-3 py-2 text-right text-orange-500">${p.envio > 0 ? '$ ' + fmt(p.envio) : '<span class="text-gray-300">-</span>'}</td>
-                    <td class="px-3 py-2 text-right text-red-500">$ ${fmt(p.impuestos)}</td>
-                    <td class="px-3 py-2 text-right text-purple-500">$ ${fmt(p.publi_est)}</td>
-                    <td class="px-3 py-2 text-right font-medium ${margenColor}">$ ${fmt(p.margen)}</td>
-                    <td class="px-3 py-2 text-right font-bold ${margenColor}">${p.margen_pct.toFixed(1)}%</td>
-                    <td class="px-3 py-2 text-right">${sugeridoDisplay}${diffTag}</td>
+                <tr class="hover:bg-gray-50">
+                    <td class="px-3 py-2.5 max-w-[280px]">
+                        <div class="text-[11px] text-gray-800 leading-tight">${p.titulo}</div>
+                        <div class="font-mono text-[9px] text-gray-400 mt-0.5">${p.sku}${costoTag}</div>
+                    </td>
+                    <td class="px-3 py-2.5 text-right text-[11px] font-semibold text-gray-800 align-middle">$ ${fmt(p.precio)}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] align-middle">${costoDisplay}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-red-500 align-middle">$ ${fmt(p.comision_ml)}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-red-500 align-middle">${p.cargo_fijo > 0 ? '$ ' + fmt(p.cargo_fijo) : '<span class="text-gray-300">-</span>'}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-orange-500 align-middle">${p.envio > 0 ? '$ ' + fmt(p.envio) : '<span class="text-gray-300">-</span>'}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-red-500 align-middle">${p.impuestos > 0 ? '$ ' + fmt(p.impuestos) : '<span class="text-gray-300">-</span>'}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-purple-500 align-middle">$ ${fmt(p.publi_est)}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] font-semibold ${margenColor} align-middle">$ ${fmt(p.margen)}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] font-bold ${margenColor} align-middle">${p.margen_pct.toFixed(1)}%</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] align-middle">${sugeridoDisplay}${diffTag}</td>
                 </tr>
             `;
         }).join('');
