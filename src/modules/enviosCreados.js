@@ -35,6 +35,7 @@ let preparacionRRHH = null;       // Registro de preparacion en RRHH
 let tareasSeleccionadas = [];     // Tareas marcadas en UI con sus colaboradores
 let consumiblesUsados = {};       // { producto_id: cantidad }
 let cantidadBultosPrep = 0;       // Cantidad de bultos ingresada
+let preparacionesRRHHMap = {};    // { id_origen: preparacion } para mostrar asignación en tarjetas
 
 // ============================================
 // HELPERS: Integración RRHH
@@ -526,6 +527,21 @@ export const moduloEnviosCreados = {
 
             enviosCache = enviosConProductos;
 
+            // Cargar preparaciones RRHH para envíos "En Preparación" (mostrar asignación en tarjetas)
+            const enviosEnPrep = enviosConProductos.filter(e => e.estado === 'En Preparación');
+            if (enviosEnPrep.length > 0) {
+                try {
+                    const { data: preps } = await supabaseRRHH.from('preparaciones')
+                        .select('id, id_origen, estado, asignado_a_id, asignado_a_nombre')
+                        .eq('tipo', 'ENVIO_MELI')
+                        .in('id_origen', enviosEnPrep.map(e => e.id_envio));
+                    preparacionesRRHHMap = {};
+                    (preps || []).forEach(p => preparacionesRRHHMap[p.id_origen] = p);
+                } catch (err) {
+                    console.error('Error cargando preparaciones RRHH:', err);
+                }
+            }
+
             // Actualizar contadores de pestañas
             moduloEnviosCreados.actualizarContadoresTabs();
 
@@ -874,7 +890,7 @@ export const moduloEnviosCreados = {
                                 ${envio.id_envio_ml ? `<span class="text-xs text-gray-500">ML: ${envio.id_envio_ml}</span>` : ''}
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 flex-wrap justify-end">
                             <span class="px-3 py-1 rounded-full text-xs font-bold ${estadoClase}">
                                 ${envio.estado}
                             </span>
@@ -883,6 +899,19 @@ export const moduloEnviosCreados = {
                                 <i class="fas fa-check-circle mr-1"></i>Embalado
                             </span>
                             ` : ''}
+                            ${(() => {
+                                const prepRRHH = preparacionesRRHHMap[envio.id_envio];
+                                if (prepRRHH?.asignado_a_nombre) {
+                                    const estadoPrep = prepRRHH.estado;
+                                    const colorPrep = estadoPrep === 'EN_PROCESO' ? 'bg-purple-100 text-purple-700 border-purple-200'
+                                        : estadoPrep === 'ASIGNADO' ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                                        : 'bg-gray-100 text-gray-600 border-gray-200';
+                                    return `<span class="px-2 py-1 rounded-full text-xs font-medium ${colorPrep} border">
+                                        <i class="fas fa-user mr-1"></i>${prepRRHH.asignado_a_nombre}
+                                    </span>`;
+                                }
+                                return '';
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -1806,22 +1835,12 @@ export const moduloEnviosCreados = {
         consumiblesUsados = {};
         cantidadBultosPrep = envio.totalBultos || 0;
 
-        // Si hay preparación en RRHH y está asignada, marcar inicio
-        if (preparacionRRHH && preparacionRRHH.estado === 'ASIGNADO') {
-            await supabaseRRHH.rpc('rpc_iniciar_preparacion', {
-                p_preparacion_id: preparacionRRHH.id,
-                p_colaborador_id: preparacionRRHH.asignado_a_id
-            });
-            // Recargar preparación para obtener fecha_inicio
-            preparacionRRHH = await obtenerPreparacionRRHH(envio.id_envio);
-        }
-
-        // Iniciar timer si la preparación está EN_PROCESO
+        // Si la preparación ya está EN_PROCESO (reanudación), reanudar timer directo sin countdown
         if (preparacionRRHH && preparacionRRHH.estado === 'EN_PROCESO' && preparacionRRHH.fecha_inicio) {
             moduloEnviosCreados.iniciarTimer(new Date(preparacionRRHH.fecha_inicio));
         } else {
-            // Si no hay preparación en RRHH, iniciar timer desde ahora
-            moduloEnviosCreados.iniciarTimer(new Date());
+            // Preparación nueva o ASIGNADA → mostrar countdown antes de iniciar
+            moduloEnviosCreados._pendienteInicioPrep = true;
         }
 
         // Verificar si hay progreso guardado
@@ -2171,6 +2190,143 @@ export const moduloEnviosCreados = {
 
         // Suscribirse a cambios en tiempo real para multi-usuario
         moduloEnviosCreados.suscribirseRealtime(envio.id_envio);
+
+        // Si hay inicio pendiente, mostrar modal de cuenta regresiva
+        if (moduloEnviosCreados._pendienteInicioPrep) {
+            moduloEnviosCreados._pendienteInicioPrep = false;
+            moduloEnviosCreados.mostrarCountdownInicio(envio);
+        }
+    },
+
+    // ============================================
+    // COUNTDOWN: Modal de cuenta regresiva antes de iniciar preparación
+    // ============================================
+    _countdownInterval: null,
+
+    mostrarCountdownInicio: (envio) => {
+        const COUNTDOWN_SECONDS = 60;
+        let segundosRestantes = COUNTDOWN_SECONDS;
+
+        // Crear overlay del modal
+        const overlay = document.createElement('div');
+        overlay.id = 'modal-countdown-overlay';
+        overlay.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+        overlay.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                <!-- Header -->
+                <div class="bg-yellow-50 border-b border-yellow-200 px-6 py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
+                            <i class="fas fa-stopwatch text-yellow-600 text-lg"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-gray-800">Preparación: ${envio.id_envio}</h3>
+                            <p class="text-sm text-gray-500">El reloj de preparación va a comenzar</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Countdown circular -->
+                <div class="px-6 py-8 text-center">
+                    <div class="relative w-36 h-36 mx-auto mb-4">
+                        <svg class="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+                            <circle cx="60" cy="60" r="54" fill="none" stroke="#e5e7eb" stroke-width="8"/>
+                            <circle id="countdown-circle" cx="60" cy="60" r="54" fill="none"
+                                    stroke="#eab308" stroke-width="8" stroke-linecap="round"
+                                    stroke-dasharray="${2 * Math.PI * 54}"
+                                    stroke-dashoffset="0"
+                                    style="transition: stroke-dashoffset 1s linear"/>
+                        </svg>
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <span id="countdown-number" class="text-4xl font-bold text-gray-800">${COUNTDOWN_SECONDS}</span>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-500">
+                        El cronómetro iniciará automáticamente.<br>
+                        <span class="text-gray-400">Si ingresaste por error, cancelá antes de que termine.</span>
+                    </p>
+                </div>
+
+                <!-- Botones -->
+                <div class="px-6 pb-6 flex gap-3">
+                    <button id="btn-countdown-cancelar"
+                            class="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors">
+                        <i class="fas fa-times mr-2"></i>Cancelar
+                    </button>
+                    <button id="btn-countdown-iniciar"
+                            class="flex-1 px-4 py-3 bg-yellow-500 text-white rounded-xl font-bold hover:bg-yellow-600 transition-colors">
+                        <i class="fas fa-play mr-2"></i>Iniciar ahora
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const circumference = 2 * Math.PI * 54;
+        const circle = document.getElementById('countdown-circle');
+        const numberEl = document.getElementById('countdown-number');
+
+        // Función para iniciar la preparación (compartida por ambos caminos)
+        const iniciarPrep = async () => {
+            clearInterval(moduloEnviosCreados._countdownInterval);
+            moduloEnviosCreados._countdownInterval = null;
+            overlay.remove();
+
+            // Si hay preparación RRHH asignada, marcar inicio via RPC
+            if (preparacionRRHH && (preparacionRRHH.estado === 'ASIGNADO' || preparacionRRHH.estado === 'PENDIENTE')) {
+                const colaboradorId = preparacionRRHH.asignado_a_id || document.getElementById('select-preparador')?.value;
+                if (colaboradorId) {
+                    await supabaseRRHH.rpc('rpc_iniciar_preparacion', {
+                        p_preparacion_id: preparacionRRHH.id,
+                        p_colaborador_id: colaboradorId
+                    });
+                    preparacionRRHH = await obtenerPreparacionRRHH(envio.id_envio);
+                }
+            }
+
+            // Iniciar timer
+            if (preparacionRRHH?.estado === 'EN_PROCESO' && preparacionRRHH.fecha_inicio) {
+                moduloEnviosCreados.iniciarTimer(new Date(preparacionRRHH.fecha_inicio));
+            } else {
+                moduloEnviosCreados.iniciarTimer(new Date());
+            }
+
+            mostrarNotificacion('Preparación iniciada', 'success');
+        };
+
+        // Función para cancelar (volver a la lista sin iniciar)
+        const cancelarCountdown = () => {
+            clearInterval(moduloEnviosCreados._countdownInterval);
+            moduloEnviosCreados._countdownInterval = null;
+            overlay.remove();
+            // No iniciar timer, el usuario puede trabajar en la vista sin cronómetro
+            mostrarNotificacion('Cronómetro no iniciado — podés revisar el envío sin tiempo corriendo', 'info');
+        };
+
+        // Event listeners
+        document.getElementById('btn-countdown-iniciar').addEventListener('click', iniciarPrep);
+        document.getElementById('btn-countdown-cancelar').addEventListener('click', cancelarCountdown);
+
+        // Iniciar cuenta regresiva
+        moduloEnviosCreados._countdownInterval = setInterval(() => {
+            segundosRestantes--;
+            if (numberEl) numberEl.textContent = segundosRestantes;
+
+            // Actualizar arco SVG
+            const offset = circumference * (1 - segundosRestantes / COUNTDOWN_SECONDS);
+            if (circle) circle.setAttribute('stroke-dashoffset', offset);
+
+            // Cambiar color en últimos 10 segundos
+            if (segundosRestantes <= 10 && circle) {
+                circle.setAttribute('stroke', '#ef4444');
+                numberEl.classList.remove('text-gray-800');
+                numberEl.classList.add('text-red-600');
+            }
+
+            if (segundosRestantes <= 0) {
+                iniciarPrep();
+            }
+        }, 1000);
     },
 
     // ============================================
@@ -2665,6 +2821,13 @@ export const moduloEnviosCreados = {
     // VOLVER: Salir de preparación (siempre funciona, ya se auto-guardó)
     // ============================================
     volverDePreparacion: async () => {
+        // Cancelar countdown si está activo
+        if (moduloEnviosCreados._countdownInterval) {
+            clearInterval(moduloEnviosCreados._countdownInterval);
+            moduloEnviosCreados._countdownInterval = null;
+        }
+        document.getElementById('modal-countdown-overlay')?.remove();
+
         // Cancelar cualquier auto-guardado pendiente y ejecutar guardado final
         if (moduloEnviosCreados.autoSaveTimeout) {
             clearTimeout(moduloEnviosCreados.autoSaveTimeout);
