@@ -243,9 +243,9 @@ export const moduloCalculadora = {
                         </div>
                     </div>
 
-                    <div class="overflow-x-auto">
+                    <div class="overflow-x-auto max-h-[70vh] overflow-y-auto">
                         <table class="min-w-full divide-y divide-gray-100">
-                            <thead class="bg-gray-50">
+                            <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
                                 <tr>
                                     <th class="px-1 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 32px;">
                                         <input type="checkbox" id="check-all" onchange="moduloCalculadora.toggleAll(this)">

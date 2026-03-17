@@ -970,7 +970,7 @@ export const moduloEnviosCreados = {
                                            </span>`
                                         : `<span class="font-medium">${cantEnviada} uds</span>`
                                     }
-                                    ${stockTallerMapEnvios[p.sku] != null ? `<span class="text-xs text-purple-400 ml-1" title="Stock en taller">T:${stockTallerMapEnvios[p.sku]}</span>` : ''}
+                                    ${(envio.estado === 'Borrador' || envio.estado === 'En Preparación') && stockTallerMapEnvios[p.sku] != null ? `<span class="text-xs text-purple-400 ml-1" title="Stock en taller">T:${stockTallerMapEnvios[p.sku]}</span>` : ''}
                                 </span>
                             </li>`;
                         }).join('')}
