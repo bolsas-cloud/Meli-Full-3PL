@@ -36,6 +36,7 @@ let tareasSeleccionadas = [];     // Tareas marcadas en UI con sus colaboradores
 let consumiblesUsados = {};       // { producto_id: cantidad }
 let cantidadBultosPrep = 0;       // Cantidad de bultos ingresada
 let preparacionesRRHHMap = {};    // { id_origen: preparacion } para mostrar asignación en tarjetas
+let stockTallerMapEnvios = {};   // { sku: stock_actual } para cards, modal y PDF
 
 // ============================================
 // HELPERS: Integración RRHH
@@ -542,6 +543,22 @@ export const moduloEnviosCreados = {
                 }
             }
 
+            // --- Stock Taller desde Producción ---
+            const todosSkusEnvios = [...new Set(enviosCache.flatMap(e => (e.productos || []).map(p => p.sku)).filter(Boolean))];
+            stockTallerMapEnvios = {};
+            if (todosSkusEnvios.length > 0) {
+                const { data: stData } = await supabaseProduccion
+                    .from('productos')
+                    .select('sku, stock_actual')
+                    .in('sku', todosSkusEnvios)
+                    .eq('tipo', 'Pack');
+                if (stData) {
+                    stData.forEach(p => {
+                        stockTallerMapEnvios[p.sku] = Math.round(p.stock_actual ?? 0);
+                    });
+                }
+            }
+
             // Actualizar contadores de pestañas
             moduloEnviosCreados.actualizarContadoresTabs();
 
@@ -944,14 +961,17 @@ export const moduloEnviosCreados = {
                             const cantEnviada = p.cantidad_enviada || 0;
                             const hayDiscrepancia = cantOriginal > cantEnviada;
                             return `
-                            <li class="flex justify-between">
+                            <li class="flex justify-between items-center">
                                 <span class="truncate" title="${p.titulo || p.sku}">${p.sku}</span>
-                                ${hayDiscrepancia
-                                    ? `<span class="font-medium text-orange-600" title="Cantidad ajustada: ${cantEnviada} de ${cantOriginal}">
-                                        ${cantEnviada} <span class="text-xs text-gray-400">de ${cantOriginal}</span>
-                                       </span>`
-                                    : `<span class="font-medium">${cantEnviada} uds</span>`
-                                }
+                                <span class="flex items-center gap-1">
+                                    ${hayDiscrepancia
+                                        ? `<span class="font-medium text-orange-600" title="Cantidad ajustada: ${cantEnviada} de ${cantOriginal}">
+                                            ${cantEnviada} <span class="text-xs text-gray-400">de ${cantOriginal}</span>
+                                           </span>`
+                                        : `<span class="font-medium">${cantEnviada} uds</span>`
+                                    }
+                                    ${stockTallerMapEnvios[p.sku] != null ? `<span class="text-xs text-purple-400 ml-1" title="Stock en taller">T:${stockTallerMapEnvios[p.sku]}</span>` : ''}
+                                </span>
                             </li>`;
                         }).join('')}
                         ${envio.productos.length > 5 ? `<li class="text-gray-400 italic">+${envio.productos.length - 5} más...</li>` : ''}
@@ -1182,6 +1202,7 @@ export const moduloEnviosCreados = {
                                 <div class="flex-1 min-w-0">
                                     <p class="font-medium text-gray-800 truncate">${p.sku}</p>
                                     <p class="text-xs text-gray-500 truncate">${p.titulo || '-'}</p>
+                                    ${stockTallerMapEnvios[p.sku] != null ? `<span class="inline-block text-xs text-purple-500 bg-purple-50 px-1.5 rounded mt-0.5">Taller: ${stockTallerMapEnvios[p.sku]}</span>` : ''}
                                 </div>
                                 <div class="flex items-center gap-2 ml-4">
                                     <input type="number" value="${p.cantidad_enviada}" min="0"
@@ -1664,6 +1685,7 @@ export const moduloEnviosCreados = {
                     p.sku || '-',
                     inventoryMap[p.sku] || '-',
                     p.titulo || '-',
+                    stockTallerMapEnvios[p.sku] != null ? stockTallerMapEnvios[p.sku] : '-',
                     cantEnviada
                 ];
 
@@ -1677,25 +1699,27 @@ export const moduloEnviosCreados = {
 
             // Header dinámico según si hay discrepancias
             const tableHead = hayDiscrepancias
-                ? [['#', 'SKU', 'Inv ID', 'Producto', 'Env', 'Orig']]
-                : [['#', 'SKU', 'Inv ID', 'Producto', 'Cant']];
+                ? [['#', 'SKU', 'Inv ID', 'Producto', 'Taller', 'Env', 'Orig']]
+                : [['#', 'SKU', 'Inv ID', 'Producto', 'Taller', 'Cant']];
 
             // Estilos de columnas dinámicos
             const columnStyles = hayDiscrepancias
                 ? {
                     0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
-                    1: { cellWidth: 30, fontSize: 7, font: 'courier' },
-                    2: { cellWidth: 20, fontSize: 7, textColor: [100, 100, 100] },
-                    3: { cellWidth: 94 },
-                    4: { cellWidth: 14, halign: 'center', fontStyle: 'bold', textColor: [234, 88, 12] }, // Naranja para enviado
-                    5: { cellWidth: 14, halign: 'center', textColor: [150, 150, 150] } // Gris para original
+                    1: { cellWidth: 28, fontSize: 7, font: 'courier' },
+                    2: { cellWidth: 18, fontSize: 7, textColor: [100, 100, 100] },
+                    3: { cellWidth: 82 },
+                    4: { cellWidth: 14, halign: 'center', textColor: [128, 90, 213] }, // Taller (purple)
+                    5: { cellWidth: 16, halign: 'center', fontStyle: 'bold', textColor: [234, 88, 12] }, // Naranja para enviado
+                    6: { cellWidth: 14, halign: 'center', textColor: [150, 150, 150] } // Gris para original
                 }
                 : {
                     0: { cellWidth: 10, halign: 'center', textColor: [150, 150, 150], fontSize: 7 },
-                    1: { cellWidth: 34, fontSize: 7, font: 'courier' },
-                    2: { cellWidth: 22, fontSize: 7, textColor: [100, 100, 100] },
-                    3: { cellWidth: 104 },
-                    4: { cellWidth: 12, halign: 'center', fontStyle: 'bold', textColor: [50, 50, 50] }
+                    1: { cellWidth: 32, fontSize: 7, font: 'courier' },
+                    2: { cellWidth: 20, fontSize: 7, textColor: [100, 100, 100] },
+                    3: { cellWidth: 88 },
+                    4: { cellWidth: 16, halign: 'center', textColor: [128, 90, 213] }, // Taller (purple)
+                    5: { cellWidth: 16, halign: 'center', fontStyle: 'bold', textColor: [50, 50, 50] }
                 };
 
             doc.autoTable({

@@ -5,7 +5,7 @@
 // bodegas de Mercado Libre Fulfillment
 // ============================================
 
-import { supabase } from '../config.js';
+import { supabase, supabaseProduccion } from '../config.js';
 import { mostrarNotificacion, formatearMoneda, colorRiesgo, generarId } from '../utils.js';
 
 // Estado local del módulo
@@ -17,6 +17,8 @@ let productosSeleccionados = new Set();
 let clasificacionPareto = {};  // { id_publicacion: { categoria, porcentaje_acumulado } }
 let filtroCategoria = 'todas'; // 'todas', 'estrella', 'regular', 'complemento'
 let filtroTexto = ''; // Filtro de búsqueda por SKU o título
+let filtroStockTaller = false; // Toggle: solo productos con stock en taller
+let stockTallerMap = {};       // { sku: stock_actual }
 
 // Estado para multi-destino
 let destinosDisponibles = [];  // Desde tabla destinos_envio
@@ -230,6 +232,14 @@ export const moduloCalculadora = {
                                     data-categoria="complemento">
                                 <span>🧩</span> Complemento <span id="count-complemento" class="text-gray-400">(0)</span>
                             </button>
+
+                            <span class="text-gray-300 mx-1">|</span>
+                            <button onclick="moduloCalculadora.toggleStockTaller()"
+                                    id="filtro-stock-taller"
+                                    class="text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1"
+                                    title="Mostrar solo productos con stock disponible en taller">
+                                🏭 Con stock taller <span id="count-stock-taller" class="text-gray-400">(0)</span>
+                            </button>
                         </div>
                     </div>
 
@@ -246,6 +256,7 @@ export const moduloCalculadora = {
                                     <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 50px;">V/Día</th>
                                     <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 50px;">Stock</th>
                                     <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 45px;">Tráns</th>
+                                    <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 50px;" title="Stock en Taller (Producción)">Taller</th>
                                     <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 40px;" title="Stock de Seguridad">Seg</th>
                                     <th class="px-1 py-2 text-right text-xs font-bold text-gray-500 uppercase" style="width: 45px;">Cob</th>
                                     <th class="px-2 py-2 text-center text-xs font-bold text-gray-500 uppercase" style="width: 140px;">Enviar</th>
@@ -254,7 +265,7 @@ export const moduloCalculadora = {
                             </thead>
                             <tbody id="tabla-sugerencias" class="divide-y divide-gray-100 text-sm">
                                 <tr>
-                                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                                    <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                                         <i class="fas fa-calculator fa-2x mb-2"></i>
                                         <p>Haz clic en "Calcular Sugerencias" para ver los resultados</p>
                                     </td>
@@ -643,7 +654,7 @@ export const moduloCalculadora = {
             mostrarNotificacion('Selecciona una fecha de colecta para calcular', 'warning');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="px-4 py-8 text-center text-yellow-600">
+                    <td colspan="12" class="px-4 py-8 text-center text-yellow-600">
                         <i class="fas fa-calendar-alt fa-2x mb-2"></i>
                         <p>Selecciona una fecha de colecta programada</p>
                     </td>
@@ -658,7 +669,7 @@ export const moduloCalculadora = {
         // ========== PASO 1: Sincronizar datos desde ML ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-sync-alt fa-spin fa-2x mb-2"></i>
                     <p>Sincronizando datos con Mercado Libre...</p>
                 </td>
@@ -671,7 +682,7 @@ export const moduloCalculadora = {
         // ========== PASO 1.5: Actualizar ventas diarias desde órdenes ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-chart-line fa-spin fa-2x mb-2"></i>
                     <p>Calculando ventas diarias desde órdenes...</p>
                 </td>
@@ -698,7 +709,7 @@ export const moduloCalculadora = {
         // ========== PASO 1.6: Actualizar stock en tránsito desde envíos activos ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-truck fa-spin fa-2x mb-2"></i>
                     <p>Calculando stock en tránsito...</p>
                 </td>
@@ -709,7 +720,7 @@ export const moduloCalculadora = {
         // ========== PASO 2: Calcular sugerencias ==========
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                     <i class="fas fa-calculator fa-spin fa-2x mb-2"></i>
                     <p>Calculando sugerencias...</p>
                 </td>
@@ -735,6 +746,22 @@ export const moduloCalculadora = {
 
             if (error) throw error;
 
+            // --- Stock Taller desde Producción ---
+            const skusCalc = (productosReales || []).map(p => p.sku).filter(Boolean);
+            stockTallerMap = {};
+            if (skusCalc.length > 0) {
+                const { data: stockTallerData } = await supabaseProduccion
+                    .from('productos')
+                    .select('sku, stock_actual')
+                    .in('sku', skusCalc)
+                    .eq('tipo', 'Pack');
+                if (stockTallerData) {
+                    stockTallerData.forEach(p => {
+                        stockTallerMap[p.sku] = Math.round(p.stock_actual ?? 0);
+                    });
+                }
+            }
+
             console.log(`Productos fulfillment encontrados: ${productosReales?.length || 0}`);
 
             if (productosReales && productosReales.length > 0) {
@@ -748,7 +775,7 @@ export const moduloCalculadora = {
             // ========== PASO 3: Calcular clasificación Pareto ==========
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                         <i class="fas fa-chart-pie fa-spin fa-2x mb-2"></i>
                         <p>Calculando clasificación Pareto...</p>
                     </td>
@@ -795,7 +822,7 @@ export const moduloCalculadora = {
             console.error('Error calculando:', error);
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="px-4 py-8 text-center text-red-500">
+                    <td colspan="12" class="px-4 py-8 text-center text-red-500">
                         <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
                         <p>Error al calcular: ${error.message}</p>
                     </td>
@@ -915,7 +942,7 @@ export const moduloCalculadora = {
         if (sugerencias.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                         <p>No hay sugerencias disponibles</p>
                     </td>
                 </tr>
@@ -929,7 +956,7 @@ export const moduloCalculadora = {
         if (sugerenciasFiltradas.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="12" class="px-4 py-8 text-center text-gray-400">
                         <p>No hay productos en esta categoría</p>
                     </td>
                 </tr>
@@ -1033,6 +1060,7 @@ export const moduloCalculadora = {
                 <td class="px-1 py-2 text-right text-sm font-medium">${(s.ventas_dia || 0).toFixed(2)}</td>
                 <td class="px-1 py-2 text-right text-sm">${s.stock_actual_full || 0}</td>
                 <td class="px-1 py-2 text-right text-sm text-gray-500">${s.stock_en_transito || 0}</td>
+                <td class="px-1 py-2 text-right text-sm ${(stockTallerMap[s.sku] || 0) > 0 ? 'text-purple-600 font-medium' : 'text-gray-400'}">${stockTallerMap[s.sku] != null ? stockTallerMap[s.sku] : '-'}</td>
                 <td class="px-1 py-2 text-right text-sm">${s.stock_seguridad || 0}</td>
                 <td class="px-1 py-2 text-right text-sm">
                     <span class="${(s.dias_cobertura || 0) < 7 && s.dias_cobertura !== Infinity ? 'text-red-600 font-bold' : ''}">
@@ -1238,6 +1266,11 @@ export const moduloCalculadora = {
         if (countEstrella) countEstrella.textContent = `(${contadores.estrella})`;
         if (countRegular) countRegular.textContent = `(${contadores.regular})`;
         if (countComplemento) countComplemento.textContent = `(${contadores.complemento})`;
+
+        // Contador stock taller
+        const conStockTaller = sugerencias.filter(s => (stockTallerMap[s.sku] || 0) > 0).length;
+        const elCountTaller = document.getElementById('count-stock-taller');
+        if (elCountTaller) elCountTaller.textContent = `(${conStockTaller})`;
     },
 
     // ============================================
@@ -1253,6 +1286,19 @@ export const moduloCalculadora = {
         document.querySelector(`.filtro-cat[data-categoria="${categoria}"]`)?.classList.add('active');
 
         // Re-pintar tabla con filtro aplicado
+        moduloCalculadora.pintarTabla();
+    },
+
+    toggleStockTaller: () => {
+        filtroStockTaller = !filtroStockTaller;
+        const btn = document.getElementById('filtro-stock-taller');
+        if (btn) {
+            if (filtroStockTaller) {
+                btn.classList.add('bg-purple-100', 'border-purple-400', 'text-purple-700');
+            } else {
+                btn.classList.remove('bg-purple-100', 'border-purple-400', 'text-purple-700');
+            }
+        }
         moduloCalculadora.pintarTabla();
     },
 
@@ -1278,6 +1324,11 @@ export const moduloCalculadora = {
                 const titulo = (s.titulo || '').toLowerCase();
                 return sku.includes(texto) || titulo.includes(texto);
             });
+        }
+
+        // Filtrar por stock en taller
+        if (filtroStockTaller) {
+            resultado = resultado.filter(s => (stockTallerMap[s.sku] || 0) > 0);
         }
 
         return resultado;

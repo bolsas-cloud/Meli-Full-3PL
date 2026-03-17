@@ -8,7 +8,7 @@
 // - Estado: Activas / Pausadas
 // ============================================
 
-import { supabase } from '../config.js';
+import { supabase, supabaseProduccion } from '../config.js';
 import { mostrarNotificacion, formatearNumero } from '../utils.js';
 
 // Estado local del modulo
@@ -19,6 +19,7 @@ let filtros = {
     logistica: 'todos',
     estado: 'todos'
 };
+let stockTallerMap = {}; // { sku: stock_actual }
 
 export const moduloStock = {
 
@@ -30,7 +31,7 @@ export const moduloStock = {
             <div class="max-w-7xl mx-auto space-y-6">
 
                 <!-- KPIs de Stock -->
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
                         <div class="flex items-center justify-between">
                             <span class="text-sm font-medium text-gray-500">Stock Full</span>
@@ -56,6 +57,15 @@ export const moduloStock = {
                         </div>
                         <p class="text-2xl font-bold text-gray-800 mt-2" id="kpi-stock-transito">-</p>
                         <p class="text-xs text-gray-500 mt-1">hacia Full</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-500">Stock Taller</span>
+                            <i class="fas fa-industry text-purple-500"></i>
+                        </div>
+                        <p class="text-2xl font-bold text-gray-800 mt-2" id="kpi-stock-taller">-</p>
+                        <p class="text-xs text-gray-500 mt-1">unidades en taller</p>
                     </div>
 
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
@@ -145,6 +155,7 @@ export const moduloStock = {
                                 <col style="width:auto">
                                 <col style="width:110px">
                                 <col style="width:90px">
+                                <col style="width:90px">
                                 <col style="width:80px">
                                 <col style="width:60px">
                                 <col style="width:110px">
@@ -155,6 +166,7 @@ export const moduloStock = {
                                     <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase">Producto</th>
                                     <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Depósito</th>
                                     <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Full</th>
+                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase">Stock Taller</th>
                                     <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase">Logística</th>
                                     <th class="px-1 py-3 text-center text-xs font-bold text-gray-500 uppercase">Flex</th>
                                     <th class="px-2 pr-4 py-3 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
@@ -162,7 +174,7 @@ export const moduloStock = {
                             </thead>
                             <tbody id="tabla-stock" class="divide-y divide-gray-100">
                                 <tr>
-                                    <td colspan="7" class="px-4 py-12 text-center text-gray-500">
+                                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
                                         <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
                                         <p>Cargando inventario...</p>
                                     </td>
@@ -240,6 +252,26 @@ export const moduloStock = {
             if (error) throw error;
 
             productos = data || [];
+
+            // --- Stock Taller desde Producción ---
+            const skusStock = productos.map(p => p.sku).filter(Boolean);
+            stockTallerMap = {};
+            if (skusStock.length > 0) {
+                const { data: stData } = await supabaseProduccion
+                    .from('productos')
+                    .select('sku, stock_actual')
+                    .in('sku', skusStock)
+                    .eq('tipo', 'Pack');
+                if (stData) {
+                    stData.forEach(p => {
+                        stockTallerMap[p.sku] = Math.round(p.stock_actual ?? 0);
+                    });
+                }
+            }
+            productos.forEach(p => {
+                p.stock_taller = stockTallerMap[p.sku] ?? null;
+            });
+
             // Guardar copia original para detectar cambios
             productosOriginales = JSON.parse(JSON.stringify(productos));
 
@@ -259,6 +291,7 @@ export const moduloStock = {
         const stockFull = productos.reduce((sum, p) => sum + (parseInt(p.stock_full) || 0), 0);
         const stockDeposito = productos.reduce((sum, p) => sum + (parseInt(p.stock_deposito) || 0), 0);
         const stockTransito = productos.reduce((sum, p) => sum + (parseInt(p.stock_transito) || 0), 0);
+        const stockTaller = productos.reduce((sum, p) => sum + (p.stock_taller || 0), 0);
         const activas = productos.filter(p => p.estado === 'active').length;
         const total = productos.length;
         const conFlex = productos.filter(p => p.tiene_flex === true).length;
@@ -266,6 +299,7 @@ export const moduloStock = {
         document.getElementById('kpi-stock-full').textContent = formatearNumero(stockFull);
         document.getElementById('kpi-stock-deposito').textContent = formatearNumero(stockDeposito);
         document.getElementById('kpi-stock-transito').textContent = formatearNumero(stockTransito);
+        document.getElementById('kpi-stock-taller').textContent = formatearNumero(stockTaller);
         document.getElementById('kpi-publicaciones').textContent = `${activas} / ${total}`;
         document.getElementById('kpi-publicaciones-detalle').textContent = 'activas / total';
         document.getElementById('kpi-flex').textContent = formatearNumero(conFlex);
@@ -300,7 +334,7 @@ export const moduloStock = {
         if (productosFiltrados.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="px-4 py-12 text-center text-gray-500">
+                    <td colspan="8" class="px-4 py-12 text-center text-gray-500">
                         <i class="fas fa-inbox fa-2x mb-2"></i>
                         <p>No se encontraron productos</p>
                     </td>
@@ -358,6 +392,9 @@ export const moduloStock = {
                     <td class="px-2 py-2 text-right text-sm font-medium ${stockCritico ? 'text-red-600' : 'text-gray-800'}">
                         ${formatearNumero(stockFull)}
                         ${stockCritico ? '<i class="fas fa-exclamation-triangle text-red-500 ml-1" title="Sin stock"></i>' : ''}
+                    </td>
+                    <td class="px-2 py-2 text-right text-sm ${(p.stock_taller || 0) > 0 ? 'text-purple-600 font-medium' : 'text-gray-400'}">
+                        ${p.stock_taller != null ? formatearNumero(p.stock_taller) : '-'}
                     </td>
                     <td class="px-2 py-2 text-center">
                         <span class="px-1.5 py-0.5 rounded-full text-xs font-bold ${logisticaColor}">${logisticaTexto}</span>
