@@ -6,6 +6,21 @@ import { supabase } from '../config.js';
 import { mostrarNotificacion, generarId, formatearFecha } from '../utils.js';
 import { moduloAuth } from './auth.js';
 
+// ---- Proxy ML via Edge Function (evita CORS) ----
+const ML_PROXY = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-proxy';
+
+const mlFetch = async (endpoint, options = {}) => {
+    const method = options.method || 'GET';
+    const url = new URL(ML_PROXY);
+    url.searchParams.set('endpoint', endpoint);
+
+    const fetchOptions = { method, headers: { 'Content-Type': 'application/json' } };
+    if (options.body) fetchOptions.body = options.body;
+
+    const resp = await fetch(url.toString(), fetchOptions);
+    return resp.json();
+};
+
 // ---- Estado del módulo ----
 let conversaciones = [];
 let mensajesActivos = [];
@@ -570,13 +585,9 @@ export const moduloMensajes = {
         const cacheTitulos = new Map();
 
         while (hayMas) {
-            // Usar fetch directo sin Content-Type para evitar preflight CORS en GET
-            const token = await moduloAuth.obtenerConfig('access_token');
-            const resp = await fetch(
-                `https://api.mercadolibre.com/questions/search?seller_id=${sellerId}&sort_fields=date_created&sort_types=DESC&api_version=4&limit=${limit}&offset=${offset}`,
-                { headers: { 'Authorization': `Bearer ${token}` } }
+            const data = await mlFetch(
+                `/questions/search?seller_id=${sellerId}&sort_fields=date_created&sort_types=DESC&api_version=4&limit=${limit}&offset=${offset}`
             );
-            const data = await resp.json();
 
             if (!data || !data.questions || data.questions.length === 0) {
                 hayMas = false;
@@ -597,7 +608,7 @@ export const moduloMensajes = {
         return count;
     },
 
-    _procesarPregunta: async (q, token, cacheTitulos) => {
+    _procesarPregunta: async (q, _token, cacheTitulos) => {
         const convId = `conv_preg_${q.id}`;
         const sellerId = moduloAuth.getUserId();
 
@@ -607,11 +618,7 @@ export const moduloMensajes = {
             if (cacheTitulos.has(q.item_id)) {
                 tituloPublicacion = cacheTitulos.get(q.item_id);
             } else {
-                const resp = await fetch(
-                    `https://api.mercadolibre.com/items/${q.item_id}?attributes=title`,
-                    { headers: { 'Authorization': `Bearer ${token}` } }
-                );
-                const item = await resp.json();
+                const item = await mlFetch(`/items/${q.item_id}?attributes=title`);
                 tituloPublicacion = item?.title || '';
                 cacheTitulos.set(q.item_id, tituloPublicacion);
             }
@@ -620,11 +627,7 @@ export const moduloMensajes = {
         // Obtener nombre del comprador
         let nombreCliente = '';
         try {
-            const resp = await fetch(
-                `https://api.mercadolibre.com/users/${q.from.id}`,
-                { headers: { 'Authorization': `Bearer ${token}` } }
-            );
-            const user = await resp.json();
+            const user = await mlFetch(`/users/${q.from.id}`);
             nombreCliente = user?.nickname || '';
         } catch (e) { /* ignorar */ }
 
@@ -702,16 +705,11 @@ export const moduloMensajes = {
                 }
             }
 
-            const token = await moduloAuth.obtenerConfig('access_token');
-
             for (const [packId, orden] of packs) {
                 try {
-                    // Usar fetch directo sin Content-Type para evitar preflight CORS
-                    const resp = await fetch(
-                        `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale`,
-                        { headers: { 'Authorization': `Bearer ${token}` } }
+                    const data = await mlFetch(
+                        `/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale`
                     );
-                    const data = await resp.json();
 
                     if (data && data.messages && data.messages.length > 0) {
                         await moduloMensajes._procesarMensajesPostventa(packId, orden, data.messages, sellerId);
@@ -791,8 +789,8 @@ export const moduloMensajes = {
             const c = conversacionSeleccionada;
 
             if (c.tipo === 'pregunta' && c.ml_question_id && !c.respondido) {
-                // Responder pregunta en ML
-                const resp = await moduloAuth.apiCall('/answers', {
+                // Responder pregunta en ML via proxy
+                const resp = await mlFetch('/answers', {
                     method: 'POST',
                     body: JSON.stringify({
                         question_id: c.ml_question_id,
@@ -802,9 +800,9 @@ export const moduloMensajes = {
 
                 if (resp.error) throw new Error(resp.error);
             } else if (c.tipo === 'mensaje_postventa' && c.ml_pack_id) {
-                // Responder mensaje post-venta en ML
+                // Responder mensaje post-venta en ML via proxy
                 const sellerId = moduloAuth.getUserId();
-                const resp = await moduloAuth.apiCall(
+                const resp = await mlFetch(
                     `/messages/packs/${c.ml_pack_id}/sellers/${sellerId}?tag=post_sale`,
                     {
                         method: 'POST',
