@@ -13,6 +13,7 @@ import { moduloBilling } from './modules/billingMeli.js';
 import { moduloAds } from './modules/adsAnalytics.js';
 import { moduloPYL } from './modules/pyl.js';
 import { moduloCostos } from './modules/costosRentabilidad.js';
+import { moduloMensajes } from './modules/mensajes.js';
 
 // Módulo activo actual (para cleanup de realtime, timers, etc.)
 let moduloActivo = null;
@@ -43,6 +44,7 @@ export const router = {
             'ads': 'Ads Analytics',
             'pyl': 'P&L Integrado',
             'costos': 'Costos y Rentabilidad',
+            'mensajes': 'Mensajes ML',
             'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
@@ -106,6 +108,11 @@ export const router = {
             case 'costos':
                 moduloCostos.render(appContent);
                 moduloActivo = moduloCostos;
+                break;
+
+            case 'mensajes':
+                moduloMensajes.render(appContent);
+                moduloActivo = moduloMensajes;
                 break;
 
             case 'depositos':
