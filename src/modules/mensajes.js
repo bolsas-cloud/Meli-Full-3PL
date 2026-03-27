@@ -11,11 +11,25 @@ const ML_PROXY = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-pro
 
 const mlFetch = async (endpoint, options = {}) => {
     const method = options.method || 'GET';
-    const url = new URL(ML_PROXY);
-    url.searchParams.set('endpoint', endpoint);
 
-    const fetchOptions = { method, headers: { 'Content-Type': 'application/json' } };
-    if (options.body) fetchOptions.body = options.body;
+    // Separar path de query params del endpoint
+    const [path, queryString] = endpoint.split('?');
+    const url = new URL(ML_PROXY);
+    url.searchParams.set('endpoint', path);
+
+    // Pasar query params del endpoint como params separados del proxy
+    if (queryString) {
+        const params = new URLSearchParams(queryString);
+        for (const [key, value] of params.entries()) {
+            url.searchParams.set(key, value);
+        }
+    }
+
+    const fetchOptions = { method };
+    if (options.body) {
+        fetchOptions.headers = { 'Content-Type': 'application/json' };
+        fetchOptions.body = options.body;
+    }
 
     const resp = await fetch(url.toString(), fetchOptions);
     return resp.json();
@@ -688,20 +702,25 @@ export const moduloMensajes = {
         let count = 0;
 
         try {
-            // Obtener órdenes recientes para buscar conversaciones
-            const { data: ordenes } = await supabase
-                .from('ordenes_meli')
-                .select('id_orden, sku, titulo_item, comprador_nickname, fecha_creacion')
-                .order('fecha_creacion', { ascending: false })
-                .limit(50);
+            // Obtener órdenes recientes desde ML API (tienen pack_id real)
+            const ordersData = await mlFetch(
+                `/orders/search/recent?seller=${sellerId}&sort=date_desc&limit=30`
+            );
 
-            if (!ordenes || ordenes.length === 0) return 0;
+            if (!ordersData?.results || ordersData.results.length === 0) return 0;
 
-            // Agrupar por id_orden (cada orden puede tener mensajes)
+            // Agrupar por pack_id real (varias órdenes pueden compartir un pack)
             const packs = new Map();
-            for (const o of ordenes) {
-                if (!packs.has(o.id_orden)) {
-                    packs.set(o.id_orden, o);
+            for (const o of ordersData.results) {
+                const packId = o.pack_id || o.id;
+                if (!packs.has(packId)) {
+                    packs.set(packId, {
+                        pack_id: packId,
+                        order_id: o.id,
+                        buyer_id: o.buyer?.id,
+                        buyer_nickname: o.buyer?.nickname,
+                        titulo: o.order_items?.[0]?.item?.title || ''
+                    });
                 }
             }
 
@@ -716,10 +735,7 @@ export const moduloMensajes = {
                         count += data.messages.length;
                     }
                 } catch (e) {
-                    // Algunas órdenes no tienen mensajes, es normal
-                    if (!e.message?.includes('404')) {
-                        console.warn(`Error mensajes pack ${packId}:`, e.message);
-                    }
+                    // Muchas órdenes no tienen mensajes, es normal (silenciar)
                 }
             }
         } catch (error) {
@@ -738,12 +754,12 @@ export const moduloMensajes = {
         await supabase.from('conversaciones_meli').upsert({
             id: convId,
             tipo: 'mensaje_postventa',
-            id_cliente_ml: null,
-            nombre_cliente: orden.comprador_nickname,
+            id_cliente_ml: orden.buyer_id,
+            nombre_cliente: orden.buyer_nickname,
             estado: 'abierta',
-            id_orden: String(orden.id_orden),
+            id_orden: String(orden.order_id),
             id_publicacion: null,
-            titulo_publicacion: orden.titulo_item || '',
+            titulo_publicacion: orden.titulo || '',
             ml_pack_id: String(packId),
             ultimo_mensaje_at: ultimoMsg?.message_date?.created || ultimoMsg?.date_created,
             ultimo_mensaje_preview: truncar(ultimoMsg?.text, 100),
@@ -763,7 +779,7 @@ export const moduloMensajes = {
                 id_conversacion: convId,
                 remitente_tipo: esVendedor ? 'vendedor' : 'cliente',
                 remitente_id: m.from?.user_id,
-                remitente_nombre: esVendedor ? 'Vendedor' : (orden.comprador_nickname || ''),
+                remitente_nombre: esVendedor ? 'Vendedor' : (orden.buyer_nickname || ''),
                 contenido: m.text,
                 ml_message_id: m.id,
                 estado: m.date_read ? 'leido' : 'enviado',
