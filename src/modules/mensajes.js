@@ -106,7 +106,7 @@ export const moduloMensajes = {
             </div>
 
             <!-- Layout 3 paneles -->
-            <div class="flex flex-1 overflow-hidden">
+            <div class="flex flex-1 min-h-0 overflow-hidden">
 
                 <!-- Panel 1: Inbox (lista de conversaciones) -->
                 <div class="w-80 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col">
@@ -143,7 +143,7 @@ export const moduloMensajes = {
                 </div>
 
                 <!-- Panel 2: Conversación activa -->
-                <div class="flex-1 flex flex-col bg-gray-50" id="msg-panel-conversacion">
+                <div class="flex-1 flex flex-col bg-gray-50 min-h-0" id="msg-panel-conversacion">
                     <div id="msg-conversacion-header" class="bg-white border-b border-gray-200 px-4 py-3 flex-shrink-0 hidden">
                         <!-- Se llena dinámicamente -->
                     </div>
@@ -837,8 +837,8 @@ export const moduloMensajes = {
                 if (resp.error) throw new Error(resp.error);
             }
 
-            // Guardar en DB local
-            const msgId = generarId('msg');
+            // Guardar en DB local (usar ID determinístico para evitar duplicados con sync)
+            const msgId = c.tipo === 'pregunta' ? `msg_resp_${c.ml_question_id}` : generarId('msg');
             const ahora = new Date().toISOString();
             const sellerId = moduloAuth.getUserId();
 
