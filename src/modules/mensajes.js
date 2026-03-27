@@ -160,22 +160,20 @@ export const moduloMensajes = {
                         </div>
                     </div>
                     <!-- Input de respuesta -->
-                    <div id="msg-input-area" class="bg-white border-t border-gray-200 p-3 flex-shrink-0 hidden">
-                        <div class="flex items-center gap-2 mb-2">
+                    <div id="msg-input-area" class="bg-white border-t border-gray-200 px-4 py-3 flex-shrink-0 hidden relative">
+                        <div id="msg-respuestas-rapidas-panel" class="hidden absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-xl w-96 max-h-72 overflow-y-auto z-50">
+                            <!-- Se llena dinámicamente -->
+                        </div>
+                        <div class="flex items-end gap-2">
                             <button onclick="moduloMensajes.toggleRespuestasRapidas()" title="Respuestas rápidas"
-                                class="p-2 text-gray-400 hover:text-brand hover:bg-gray-100 rounded-lg transition-colors">
+                                class="h-10 w-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-brand hover:bg-gray-100 rounded-lg transition-colors border border-gray-200">
                                 <i class="fas fa-bolt"></i>
                             </button>
-                            <div id="msg-respuestas-rapidas-panel" class="hidden absolute bottom-20 left-80 bg-white border border-gray-200 rounded-xl shadow-xl w-96 max-h-72 overflow-y-auto z-50">
-                                <!-- Se llena dinámicamente -->
-                            </div>
-                        </div>
-                        <div class="flex gap-2">
                             <textarea id="msg-input-texto" rows="2" placeholder="Escribí tu respuesta..."
                                 class="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/30 focus:border-brand outline-none resize-none"
                                 onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();moduloMensajes.enviarRespuesta()}"></textarea>
                             <button onclick="moduloMensajes.enviarRespuesta()" id="btn-enviar-respuesta"
-                                class="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors self-end">
+                                class="h-10 w-10 flex-shrink-0 flex items-center justify-center bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                         </div>
