@@ -65,6 +65,10 @@ supabase
     })
     .subscribe();
 
+// ---- Agente IA ----
+const AGENTE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-agente';
+let sugerenciaTexto = '';
+
 // ---- Estado del módulo ----
 let conversaciones = [];
 let mensajesActivos = [];
@@ -186,6 +190,33 @@ export const moduloMensajes = {
                             <div class="text-center">
                                 <i class="fas fa-comments fa-3x mb-3"></i>
                                 <p class="text-sm">Seleccioná una conversación</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Sugerencia IA -->
+                    <div id="msg-sugerencia-ia" class="hidden flex-shrink-0 border-t border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-2.5">
+                        <div class="flex items-start gap-2">
+                            <div class="flex-shrink-0 mt-0.5">
+                                <span class="inline-flex items-center justify-center w-6 h-6 bg-emerald-500 text-white rounded-full text-[10px]">
+                                    <i class="fas fa-robot"></i>
+                                </span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="text-[11px] font-semibold text-emerald-700">Sugerencia IA</span>
+                                    <span id="msg-ia-iteraciones" class="text-[10px] text-emerald-500"></span>
+                                </div>
+                                <p id="msg-ia-texto" class="text-sm text-gray-700 whitespace-pre-wrap"></p>
+                            </div>
+                            <div class="flex items-center gap-1 flex-shrink-0">
+                                <button onclick="moduloMensajes.usarSugerenciaIA()" title="Usar esta respuesta"
+                                    class="px-2.5 py-1 bg-emerald-500 text-white text-xs rounded-lg hover:bg-emerald-600 transition-colors">
+                                    <i class="fas fa-check mr-1"></i>Usar
+                                </button>
+                                <button onclick="moduloMensajes.descartarSugerenciaIA()" title="Descartar"
+                                    class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                                    <i class="fas fa-times"></i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -342,6 +373,13 @@ export const moduloMensajes = {
         document.getElementById('msg-input-area').classList.remove('hidden');
         document.getElementById('msg-panel-contexto').classList.remove('hidden');
         document.getElementById('msg-conversacion-header').classList.remove('hidden');
+
+        // Pedir sugerencia IA si no está respondido
+        if (!conversacionSeleccionada.respondido) {
+            moduloMensajes.pedirSugerenciaIA();
+        } else {
+            document.getElementById('msg-sugerencia-ia').classList.add('hidden');
+        }
     },
 
     // ---- CARGAR MENSAJES DE UNA CONVERSACIÓN ----
@@ -928,6 +966,87 @@ export const moduloMensajes = {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
         }
+    },
+
+    // ============================================
+    // SUGERENCIA IA
+    // ============================================
+
+    pedirSugerenciaIA: async () => {
+        const panel = document.getElementById('msg-sugerencia-ia');
+        const textoEl = document.getElementById('msg-ia-texto');
+        const iterEl = document.getElementById('msg-ia-iteraciones');
+
+        // Mostrar loading
+        panel.classList.remove('hidden');
+        textoEl.innerHTML = '<i class="fas fa-circle-notch fa-spin text-emerald-500 mr-2"></i><span class="text-gray-400 text-xs">Generando sugerencia...</span>';
+        iterEl.textContent = '';
+        sugerenciaTexto = '';
+
+        try {
+            // Obtener último mensaje del cliente
+            const msgCliente = mensajesActivos.filter(m => m.remitente_tipo === 'cliente').pop();
+            if (!msgCliente) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            // Armar historial para contexto
+            const historial = mensajesActivos
+                .filter(m => !m.es_nota_interna && m.remitente_tipo !== 'sistema')
+                .slice(-6) // últimos 6 mensajes
+                .map(m => ({
+                    role: m.remitente_tipo === 'cliente' ? 'user' : 'assistant',
+                    content: m.contenido
+                }));
+
+            // Contexto de la conversación
+            const contexto = {};
+            if (conversacionSeleccionada.titulo_publicacion) {
+                contexto.publicacion = conversacionSeleccionada.titulo_publicacion;
+            }
+            if (conversacionSeleccionada.id_orden) {
+                contexto.orden = conversacionSeleccionada.id_orden;
+            }
+
+            // Llamar al agente
+            const resp = await fetch(AGENTE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mensaje: msgCliente.contenido,
+                    contexto: { ...contexto, historial: historial.slice(0, -1) }, // excluir último (es el mismo mensaje)
+                })
+            });
+
+            const data = await resp.json();
+
+            if (data.error) {
+                textoEl.textContent = 'Error al generar sugerencia';
+                iterEl.textContent = '';
+                return;
+            }
+
+            sugerenciaTexto = data.texto || '';
+            textoEl.textContent = sugerenciaTexto;
+            iterEl.textContent = data.iteraciones > 0 ? `(${data.iteraciones} consulta${data.iteraciones > 1 ? 's' : ''})` : '';
+
+        } catch (error) {
+            console.error('Error sugerencia IA:', error);
+            textoEl.textContent = 'No se pudo generar la sugerencia';
+            iterEl.textContent = '';
+        }
+    },
+
+    usarSugerenciaIA: () => {
+        if (!sugerenciaTexto) return;
+        document.getElementById('msg-input-texto').value = sugerenciaTexto;
+        document.getElementById('msg-sugerencia-ia').classList.add('hidden');
+    },
+
+    descartarSugerenciaIA: () => {
+        document.getElementById('msg-sugerencia-ia').classList.add('hidden');
+        sugerenciaTexto = '';
     },
 
     // ---- NOTA INTERNA ----
