@@ -613,7 +613,7 @@ export const moduloMensajes = {
             }
 
             for (const q of data.questions) {
-                await moduloMensajes._procesarPregunta(q, token, cacheTitulos);
+                await moduloMensajes._procesarPregunta(q, null, cacheTitulos);
                 count++;
             }
 
