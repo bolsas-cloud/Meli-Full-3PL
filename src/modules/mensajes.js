@@ -194,6 +194,14 @@ export const moduloMensajes = {
             moduloMensajes.pintarListaConversaciones();
         });
 
+        // Cerrar panel respuestas rápidas al hacer click afuera
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('msg-respuestas-rapidas-panel');
+            if (panel && !panel.classList.contains('hidden') && !panel.contains(e.target) && !e.target.closest('[title="Respuestas rápidas"]')) {
+                panel.classList.add('hidden');
+            }
+        });
+
         // Cargar datos
         await moduloMensajes.cargarConversaciones();
         await moduloMensajes.cargarRespuestasRapidas();
@@ -939,8 +947,11 @@ export const moduloMensajes = {
         if (panel.classList.contains('hidden')) {
             panel.classList.remove('hidden');
             panel.innerHTML = `
-                <div class="p-3 border-b border-gray-100">
+                <div class="p-3 border-b border-gray-100 flex items-center justify-between">
                     <h4 class="text-sm font-bold text-gray-700"><i class="fas fa-bolt text-yellow-500 mr-1"></i>Respuestas rápidas</h4>
+                    <button onclick="moduloMensajes.toggleRespuestasRapidas()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
                 <div class="divide-y divide-gray-100">
                     ${respuestasRapidas.map(r => `
