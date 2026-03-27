@@ -550,7 +550,8 @@ export const moduloMensajes = {
     // ============================================
 
     sincronizarTodo: async () => {
-        if (cargandoSync) return;
+        console.log('[Mensajes] Iniciando sincronización...');
+        if (cargandoSync) { console.log('[Mensajes] Ya hay una sync en curso, saliendo'); return; }
         cargandoSync = true;
         const btn = document.getElementById('btn-sync-mensajes');
         btn.disabled = true;
@@ -558,6 +559,7 @@ export const moduloMensajes = {
 
         try {
             const conectado = await moduloAuth.verificarSesion();
+            console.log('[Mensajes] Sesión ML:', conectado, 'userId:', moduloAuth.getUserId());
             if (!conectado) {
                 mostrarNotificacion('Conectate a MercadoLibre primero', 'warning');
                 return;
@@ -569,6 +571,7 @@ export const moduloMensajes = {
                 moduloMensajes.sincronizarMensajesPostventa()
             ]);
 
+            console.log('[Mensajes] Resultados sync:', pregRes, msgRes);
             const pregCount = pregRes.status === 'fulfilled' ? pregRes.value : 0;
             const msgCount = msgRes.status === 'fulfilled' ? msgRes.value : 0;
 
@@ -588,6 +591,7 @@ export const moduloMensajes = {
     // ---- SYNC PREGUNTAS ----
     sincronizarPreguntas: async () => {
         const sellerId = moduloAuth.getUserId();
+        console.log('[Mensajes] Sync preguntas, sellerId:', sellerId);
         if (!sellerId) return 0;
 
         let count = 0;
