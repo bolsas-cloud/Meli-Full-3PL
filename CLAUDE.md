@@ -40,6 +40,8 @@ Deploys to Vercel on push to `master`.
 | `depositos.js` | Warehouse/depot configuration |
 | `remitosEnvio.js` | Invoice generation for 3PL shipments |
 | `apiMeli.js` | MercadoLibre API wrapper |
+| `mensajes.js` | Inbox unificado preguntas + mensajes ML, sincronización, respuestas rápidas |
+| `knowledgeBase.js` | CRUD de documentos para la base de conocimiento del agente IA (RAG) |
 
 ### Module Pattern
 ```javascript
@@ -83,6 +85,41 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `config_logistica` | Calculator parameters (transit time, frequency, service level) |
 | `costos_publicidad` | Daily ad spend (2-day delay from ML API) |
 | `publicaciones_activas` | Active listings on ML |
+| `conversaciones_meli` | Inbox unificado preguntas + mensajes post-venta |
+| `mensajes_meli` | Mensajes individuales dentro de conversaciones |
+| `respuestas_rapidas` | Templates de respuestas rápidas con variables |
+| `knowledge_base` | Documentos de la base de conocimiento (RAG) |
+| `knowledge_chunks` | Fragmentos con embeddings vectoriales (pgvector 768d) |
+
+## Edge Functions (Supabase)
+
+| Function | Purpose |
+|----------|---------|
+| `meli-proxy` | Proxy CORS para ML API (browser no puede llamar directo) |
+| `meli-webhook` | Recibe notificaciones real-time de ML (questions + messages) |
+| `knowledge-processor` | RAG: chunking + embeddings (Gemini text-embedding-004) + vector search |
+| `meli-agente` | Agente IA con Gemini 2.0 Flash + 7 tools + agent loop |
+
+### Agente IA (meli-agente)
+
+- **Modelo**: Gemini 2.0 Flash (via `@google/genai`)
+- **7 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas
+- **System prompt**: vendedor ML, español rioplatense, nunca inventa datos
+- **Config**: tabla `config_meli` claves `ia_modelo`, `ia_temperatura`, `ia_max_tokens`, `ia_prompt`, `ia_reglas`
+- **RAG**: knowledge_base + knowledge_chunks con pgvector (768 dims, Gemini text-embedding-004)
+- **Patrón replicado de**: VentasApp-Cosiditas (ver `docs/ARQUITECTURA_AGENTE_IA_RAG.md` en ese repo)
+
+### ML API Integration via Proxy
+
+Las llamadas a la API de MercadoLibre desde el browser **deben pasar por `meli-proxy`** porque ML no soporta CORS. El proxy lee el access_token de `config_meli` automáticamente.
+
+```javascript
+const mlFetch = async (endpoint, options) => {
+    const url = new URL(ML_PROXY);
+    url.searchParams.set('endpoint', path);
+    // query params se pasan como params separados del proxy
+};
+```
 
 ## Critical Data Conventions
 
@@ -125,4 +162,4 @@ La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="
 
 No incrementar para cambios puramente cosméticos, docs, o configuración.
 
-Currently v1.10.0.
+Currently v1.15.0.
