@@ -617,6 +617,8 @@ export const moduloMensajes = {
             }
 
             for (const q of data.questions) {
+                // Ignorar preguntas baneadas, eliminadas o bajo revisión sin texto
+                if (['BANNED', 'DELETED', 'DISABLED'].includes(q.status) || !q.text) continue;
                 await moduloMensajes._procesarPregunta(q, null, cacheTitulos);
                 count++;
             }
