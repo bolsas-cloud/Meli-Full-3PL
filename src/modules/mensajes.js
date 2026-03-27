@@ -566,10 +566,17 @@ export const moduloMensajes = {
         const limit = 50;
         let hayMas = true;
 
+        // Cache de títulos e info para no repetir llamadas
+        const cacheTitulos = new Map();
+
         while (hayMas) {
-            const data = await moduloAuth.apiCall(
-                `/questions/search?seller_id=${sellerId}&sort_fields=date_created&sort_types=DESC&api_version=4&limit=${limit}&offset=${offset}`
+            // Usar fetch directo sin Content-Type para evitar preflight CORS en GET
+            const token = await moduloAuth.obtenerConfig('access_token');
+            const resp = await fetch(
+                `https://api.mercadolibre.com/questions/search?seller_id=${sellerId}&sort_fields=date_created&sort_types=DESC&api_version=4&limit=${limit}&offset=${offset}`,
+                { headers: { 'Authorization': `Bearer ${token}` } }
             );
+            const data = await resp.json();
 
             if (!data || !data.questions || data.questions.length === 0) {
                 hayMas = false;
@@ -577,7 +584,7 @@ export const moduloMensajes = {
             }
 
             for (const q of data.questions) {
-                await moduloMensajes._procesarPregunta(q);
+                await moduloMensajes._procesarPregunta(q, token, cacheTitulos);
                 count++;
             }
 
@@ -590,21 +597,34 @@ export const moduloMensajes = {
         return count;
     },
 
-    _procesarPregunta: async (q) => {
+    _procesarPregunta: async (q, token, cacheTitulos) => {
         const convId = `conv_preg_${q.id}`;
         const sellerId = moduloAuth.getUserId();
 
-        // Obtener info de la publicación
+        // Obtener info de la publicación (con cache)
         let tituloPublicacion = '';
         try {
-            const item = await moduloAuth.apiCall(`/items/${q.item_id}?attributes=title`);
-            tituloPublicacion = item?.title || '';
+            if (cacheTitulos.has(q.item_id)) {
+                tituloPublicacion = cacheTitulos.get(q.item_id);
+            } else {
+                const resp = await fetch(
+                    `https://api.mercadolibre.com/items/${q.item_id}?attributes=title`,
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+                const item = await resp.json();
+                tituloPublicacion = item?.title || '';
+                cacheTitulos.set(q.item_id, tituloPublicacion);
+            }
         } catch (e) { /* ignorar */ }
 
         // Obtener nombre del comprador
         let nombreCliente = '';
         try {
-            const user = await moduloAuth.apiCall(`/users/${q.from.id}`);
+            const resp = await fetch(
+                `https://api.mercadolibre.com/users/${q.from.id}`,
+                { headers: { 'Authorization': `Bearer ${token}` } }
+            );
+            const user = await resp.json();
             nombreCliente = user?.nickname || '';
         } catch (e) { /* ignorar */ }
 
@@ -668,26 +688,30 @@ export const moduloMensajes = {
             // Obtener órdenes recientes para buscar conversaciones
             const { data: ordenes } = await supabase
                 .from('ordenes_meli')
-                .select('order_id, pack_id, buyer_id, buyer_nickname, titulo')
-                .order('fecha_venta', { ascending: false })
+                .select('id_orden, sku, titulo_item, comprador_nickname, fecha_creacion')
+                .order('fecha_creacion', { ascending: false })
                 .limit(50);
 
             if (!ordenes || ordenes.length === 0) return 0;
 
-            // Agrupar por pack_id (o order_id si no hay pack)
+            // Agrupar por id_orden (cada orden puede tener mensajes)
             const packs = new Map();
             for (const o of ordenes) {
-                const key = o.pack_id || o.order_id;
-                if (!packs.has(key)) {
-                    packs.set(key, o);
+                if (!packs.has(o.id_orden)) {
+                    packs.set(o.id_orden, o);
                 }
             }
 
+            const token = await moduloAuth.obtenerConfig('access_token');
+
             for (const [packId, orden] of packs) {
                 try {
-                    const data = await moduloAuth.apiCall(
-                        `/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale`
+                    // Usar fetch directo sin Content-Type para evitar preflight CORS
+                    const resp = await fetch(
+                        `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale`,
+                        { headers: { 'Authorization': `Bearer ${token}` } }
                     );
+                    const data = await resp.json();
 
                     if (data && data.messages && data.messages.length > 0) {
                         await moduloMensajes._procesarMensajesPostventa(packId, orden, data.messages, sellerId);
@@ -716,12 +740,12 @@ export const moduloMensajes = {
         await supabase.from('conversaciones_meli').upsert({
             id: convId,
             tipo: 'mensaje_postventa',
-            id_cliente_ml: orden.buyer_id,
-            nombre_cliente: orden.buyer_nickname,
+            id_cliente_ml: null,
+            nombre_cliente: orden.comprador_nickname,
             estado: 'abierta',
-            id_orden: String(orden.order_id),
+            id_orden: String(orden.id_orden),
             id_publicacion: null,
-            titulo_publicacion: orden.titulo || '',
+            titulo_publicacion: orden.titulo_item || '',
             ml_pack_id: String(packId),
             ultimo_mensaje_at: ultimoMsg?.message_date?.created || ultimoMsg?.date_created,
             ultimo_mensaje_preview: truncar(ultimoMsg?.text, 100),
@@ -741,7 +765,7 @@ export const moduloMensajes = {
                 id_conversacion: convId,
                 remitente_tipo: esVendedor ? 'vendedor' : 'cliente',
                 remitente_id: m.from?.user_id,
-                remitente_nombre: esVendedor ? 'Vendedor' : (orden.buyer_nickname || ''),
+                remitente_nombre: esVendedor ? 'Vendedor' : (orden.comprador_nickname || ''),
                 contenido: m.text,
                 ml_message_id: m.id,
                 estado: m.date_read ? 'leido' : 'enviado',
