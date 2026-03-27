@@ -35,6 +35,36 @@ const mlFetch = async (endpoint, options = {}) => {
     return resp.json();
 };
 
+// ---- Badge global del sidebar (se actualiza via Realtime) ----
+const actualizarBadgeSidebar = async () => {
+    try {
+        const { data } = await supabase
+            .from('conversaciones_meli')
+            .select('mensajes_sin_leer')
+            .gt('mensajes_sin_leer', 0);
+
+        const total = (data || []).reduce((acc, c) => acc + (c.mensajes_sin_leer || 0), 0);
+        const badge = document.getElementById('badge-mensajes-sidebar');
+        if (badge) {
+            if (total > 0) {
+                badge.textContent = total > 99 ? '99+' : total;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+    } catch (e) { /* silenciar */ }
+};
+
+// Actualizar badge al cargar y suscribirse a cambios
+actualizarBadgeSidebar();
+supabase
+    .channel('badge-mensajes-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversaciones_meli' }, () => {
+        actualizarBadgeSidebar();
+    })
+    .subscribe();
+
 // ---- Estado del módulo ----
 let conversaciones = [];
 let mensajesActivos = [];
