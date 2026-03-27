@@ -85,8 +85,12 @@ export const moduloMensajes = {
 
     // ---- RENDER PRINCIPAL ----
     render: async (contenedor) => {
+        // Quitar padding del contenedor padre para que el inbox ocupe todo
+        contenedor.classList.remove('p-4', 'sm:p-8', 'overflow-y-auto');
+        contenedor.classList.add('p-0', 'overflow-hidden');
+
         contenedor.innerHTML = `
-        <div class="h-[calc(100vh-4rem)] flex flex-col">
+        <div class="h-full flex flex-col">
 
             <!-- Header con acciones -->
             <div class="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between flex-shrink-0">
@@ -1012,6 +1016,12 @@ export const moduloMensajes = {
         if (realtimeChannel) {
             supabase.removeChannel(realtimeChannel);
             realtimeChannel = null;
+        }
+        // Restaurar padding del contenedor
+        const contenedor = document.getElementById('app-content');
+        if (contenedor) {
+            contenedor.classList.remove('p-0', 'overflow-hidden');
+            contenedor.classList.add('p-4', 'sm:p-8', 'overflow-y-auto');
         }
         conversaciones = [];
         mensajesActivos = [];
