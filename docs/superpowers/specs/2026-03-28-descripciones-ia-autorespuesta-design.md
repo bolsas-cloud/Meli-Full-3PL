@@ -112,6 +112,32 @@ Actualizar system prompt:
 
 ---
 
+## 5. Tracking de respuestas IA
+
+### Marcado de mensajes
+Agregar columna `origen_ia BOOLEAN DEFAULT false` a `mensajes_meli`. Se marca `true` cuando:
+
+- **Manual con sugerencia IA**: el usuario clickea "Editar y usar" la sugerencia del agente y envía
+- **Auto-respuesta**: el webhook responde automáticamente
+
+### Marcado en conversaciones
+Agregar columna `respondido_por TEXT` a `conversaciones_meli` con valores:
+- `'humano'` — respondió el vendedor sin IA
+- `'ia_asistida'` — usó la sugerencia IA (editada o no)
+- `'ia_automatica'` — auto-respuesta del webhook
+
+### Métricas futuras (Fase 3+)
+Con estos datos se podrá medir:
+- Tasa de uso de sugerencias IA vs respuesta manual
+- Tiempo de respuesta IA vs humano
+- Conversión pregunta→compra por tipo de respuesta
+- Calidad de auto-respuestas (revisión manual)
+
+### Visualización
+En el módulo de mensajes, los mensajes con `origen_ia = true` mostrarían un badge discreto (ej: icono de robot) para identificarlos rápidamente al revisar.
+
+---
+
 ## Archivos afectados
 
 | Archivo | Acción | Cambios |
@@ -122,6 +148,8 @@ Actualizar system prompt:
 | Edge Function `meli-agente` | Deploy | URL en buscar_publicacion, tool reescribir_descripcion, system prompt actualizado |
 | Edge Function `meli-webhook` | Deploy | Lógica auto-respuesta condicional |
 | Tabla `publicaciones_meli` | Migration | Agregar columna `descripcion TEXT` |
+| Tabla `mensajes_meli` | Migration | Agregar columna `origen_ia BOOLEAN DEFAULT false` |
+| Tabla `conversaciones_meli` | Migration | Agregar columna `respondido_por TEXT` |
 | Tabla `config_meli` | Insert | Clave `autorespuesta_activa` = `false` |
 
 ---
