@@ -111,7 +111,7 @@ export const moduloPublicaciones = {
                                     <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase whitespace-nowrap">ID Pub.</th>
                                     <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase whitespace-nowrap">SKU</th>
                                     <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Inv. ID</th>
-                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase" style="width:40%">Título</th>
+                                    <th class="px-2 py-2 text-left text-xs font-bold text-gray-500 uppercase" style="width:30%">Título</th>
                                     <th class="px-2 py-2 text-right text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Precio</th>
                                     <th class="px-2 py-2 text-center text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Stock</th>
                                     <th class="px-2 py-2 text-center text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Logística</th>
@@ -378,10 +378,10 @@ export const moduloPublicaciones = {
                     <td class="px-2 py-2 font-mono text-[11px] whitespace-nowrap ${skuClass}">${p.sku || '(sin SKU)'}</td>
                     <td class="px-2 py-2 font-mono text-[11px] whitespace-nowrap ${invClass}">${p.id_inventario || '(sin ID)'}</td>
                     <td class="px-2 py-2">
-                        <div class="text-sm truncate" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
+                        <div class="text-xs truncate" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
-                    <td class="px-2 py-2 text-right font-medium text-sm whitespace-nowrap">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
-                    <td class="px-2 py-2 text-center font-bold text-sm ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
+                    <td class="px-2 py-2 text-right font-medium text-xs whitespace-nowrap">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
+                    <td class="px-2 py-2 text-center font-bold text-xs ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
                     <td class="px-2 py-2 text-center whitespace-nowrap">
                         <span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${logClase}">
                             ${p.tipo_logistica || '-'}
