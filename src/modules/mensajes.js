@@ -76,6 +76,7 @@ let respuestasRapidas = [];
 let conversacionSeleccionada = null;
 let filtros = { busqueda: '', tipo: 'todos', estado: 'abierta' };
 let cargandoSync = false;
+let enviandoRespuesta = false;
 let realtimeChannel = null;
 
 // ---- Helpers ----
@@ -136,6 +137,11 @@ export const moduloMensajes = {
                     <span id="msg-badge-sin-leer" class="hidden bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="moduloMensajes.sincronizarHistorico()" id="btn-sync-historico"
+                        class="px-3 py-1.5 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-2"
+                        title="Traer todo el historial de preguntas y mensajes de ML">
+                        <i class="fas fa-history"></i> Historial completo
+                    </button>
                     <button onclick="moduloMensajes.sincronizarTodo()" id="btn-sync-mensajes"
                         class="px-3 py-1.5 bg-brand text-white text-sm rounded-lg hover:bg-brand-dark transition-colors flex items-center gap-2">
                         <i class="fas fa-sync-alt"></i> Sincronizar ML
@@ -209,9 +215,9 @@ export const moduloMensajes = {
                                 <p id="msg-ia-texto" class="text-sm text-gray-700 whitespace-pre-wrap"></p>
                             </div>
                             <div class="flex items-center gap-1 flex-shrink-0">
-                                <button onclick="moduloMensajes.usarSugerenciaIA()" title="Usar esta respuesta"
+                                <button onclick="moduloMensajes.usarSugerenciaIA()" title="Copiar al input para editar y enviar"
                                     class="px-2.5 py-1 bg-emerald-500 text-white text-xs rounded-lg hover:bg-emerald-600 transition-colors">
-                                    <i class="fas fa-check mr-1"></i>Usar
+                                    <i class="fas fa-pen mr-1"></i>Editar y usar
                                 </button>
                                 <button onclick="moduloMensajes.descartarSugerenciaIA()" title="Descartar"
                                     class="p-1 text-gray-400 hover:text-gray-600 transition-colors">
@@ -666,6 +672,127 @@ export const moduloMensajes = {
         }
     },
 
+    // ---- SYNC HISTÓRICO COMPLETO ----
+    sincronizarHistorico: async () => {
+        if (cargandoSync) return;
+
+        if (!confirm('Esto va a traer TODO el historial de preguntas y mensajes de MercadoLibre. Puede tardar varios minutos. ¿Continuar?')) return;
+
+        cargandoSync = true;
+        const btn = document.getElementById('btn-sync-historico');
+        const btnSync = document.getElementById('btn-sync-mensajes');
+        btn.disabled = true;
+        btnSync.disabled = true;
+
+        const updateBtn = (text) => { btn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> ${text}`; };
+        updateBtn('Conectando...');
+
+        try {
+            const conectado = await moduloAuth.verificarSesion();
+            if (!conectado) {
+                mostrarNotificacion('Conectate a MercadoLibre primero', 'warning');
+                return;
+            }
+
+            const sellerId = moduloAuth.getUserId();
+            if (!sellerId) return;
+
+            // ---- PREGUNTAS SIN LÍMITE ----
+            let pregCount = 0;
+            let offset = 0;
+            const limit = 50;
+            let hayMas = true;
+            const cacheTitulos = new Map();
+
+            updateBtn(`Preguntas: ${pregCount}...`);
+
+            while (hayMas) {
+                const data = await mlFetch(
+                    `/questions/search?seller_id=${sellerId}&sort_fields=date_created&sort_types=DESC&api_version=4&limit=${limit}&offset=${offset}`
+                );
+
+                if (!data || !data.questions || data.questions.length === 0) {
+                    hayMas = false;
+                    break;
+                }
+
+                for (const q of data.questions) {
+                    if (['BANNED', 'DELETED', 'DISABLED'].includes(q.status) || !q.text) continue;
+                    await moduloMensajes._procesarPregunta(q, null, cacheTitulos);
+                    pregCount++;
+                }
+
+                offset += limit;
+                if (offset >= (data.total || 0)) hayMas = false;
+
+                updateBtn(`Preguntas: ${pregCount} de ${data.total || '?'}...`);
+            }
+
+            // ---- MENSAJES POST-VENTA (PAGINADO COMPLETO) ----
+            let msgCount = 0;
+            let ordersOffset = 0;
+            const ordersLimit = 50;
+            let hayMasOrdenes = true;
+            const packsVisitados = new Set();
+
+            updateBtn(`Preguntas: ${pregCount} ✓ | Mensajes: buscando...`);
+
+            while (hayMasOrdenes) {
+                const ordersData = await mlFetch(
+                    `/orders/search/recent?seller=${sellerId}&sort=date_desc&limit=${ordersLimit}&offset=${ordersOffset}`
+                );
+
+                if (!ordersData?.results || ordersData.results.length === 0) {
+                    hayMasOrdenes = false;
+                    break;
+                }
+
+                for (const o of ordersData.results) {
+                    const packId = o.pack_id || o.id;
+                    if (packsVisitados.has(packId)) continue;
+                    packsVisitados.add(packId);
+
+                    try {
+                        const data = await mlFetch(
+                            `/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale`
+                        );
+
+                        if (data && data.messages && data.messages.length > 0) {
+                            const orden = {
+                                pack_id: packId,
+                                order_id: o.id,
+                                buyer_id: o.buyer?.id,
+                                buyer_nickname: o.buyer?.nickname,
+                                titulo: o.order_items?.[0]?.item?.title || ''
+                            };
+                            await moduloMensajes._procesarMensajesPostventa(packId, orden, data.messages, sellerId);
+                            msgCount += data.messages.length;
+                        }
+                    } catch (_e) { /* órdenes sin mensajes, normal */ }
+                }
+
+                ordersOffset += ordersLimit;
+                if (ordersOffset >= (ordersData.paging?.total || ordersData.results.length)) hayMasOrdenes = false;
+                // Limitar a 500 órdenes máximo para no exceder rate limits
+                if (ordersOffset >= 500) hayMasOrdenes = false;
+
+                updateBtn(`Preguntas: ${pregCount} ✓ | Mensajes: ${msgCount} (${packsVisitados.size} chats)...`);
+            }
+
+            await moduloMensajes.cargarConversaciones();
+            mostrarNotificacion(`Historial completo: ${pregCount} preguntas, ${msgCount} mensajes de ${packsVisitados.size} conversaciones`, 'success');
+
+        } catch (error) {
+            console.error('Error en sync histórico:', error);
+            mostrarNotificacion('Error: ' + error.message, 'error');
+        } finally {
+            cargandoSync = false;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-history"></i> Historial completo';
+            btnSync.disabled = false;
+        }
+    },
+
     // ---- SYNC PREGUNTAS ----
     sincronizarPreguntas: async () => {
         const sellerId = moduloAuth.getUserId();
@@ -884,9 +1011,11 @@ export const moduloMensajes = {
         const btn = document.getElementById('btn-enviar-respuesta');
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+        enviandoRespuesta = true;
 
         try {
             const c = conversacionSeleccionada;
+            let mlMessageId = null;
 
             if (c.tipo === 'pregunta' && c.ml_question_id && !c.respondido) {
                 // Responder pregunta en ML via proxy
@@ -901,13 +1030,13 @@ export const moduloMensajes = {
                 if (resp.error) throw new Error(resp.error);
             } else if (c.tipo === 'mensaje_postventa' && c.ml_pack_id) {
                 // Responder mensaje post-venta en ML via proxy
-                const sellerId = moduloAuth.getUserId();
+                const sellerIdPv = moduloAuth.getUserId();
                 const resp = await mlFetch(
-                    `/messages/packs/${c.ml_pack_id}/sellers/${sellerId}?tag=post_sale`,
+                    `/messages/packs/${c.ml_pack_id}/sellers/${sellerIdPv}?tag=post_sale`,
                     {
                         method: 'POST',
                         body: JSON.stringify({
-                            from: { user_id: parseInt(sellerId) },
+                            from: { user_id: parseInt(sellerIdPv) },
                             to: { user_id: parseInt(c.id_cliente_ml) },
                             text: texto
                         })
@@ -915,21 +1044,31 @@ export const moduloMensajes = {
                 );
 
                 if (resp.error) throw new Error(resp.error);
+                // Guardar el ID del mensaje de ML para usar ID determinístico
+                mlMessageId = resp.id || null;
             }
 
-            // Guardar en DB local (usar ID determinístico para evitar duplicados con sync)
-            const msgId = c.tipo === 'pregunta' ? `msg_resp_${c.ml_question_id}` : generarId('msg');
+            // Guardar en DB local (usar ID determinístico para evitar duplicados con webhook/sync)
+            let msgId;
+            if (c.tipo === 'pregunta') {
+                msgId = `msg_resp_${c.ml_question_id}`;
+            } else if (mlMessageId) {
+                msgId = `msg_pv_${mlMessageId}`;
+            } else {
+                msgId = `msg_pv_${c.ml_pack_id}_${Date.now()}`;
+            }
             const ahora = new Date().toISOString();
             const sellerId = moduloAuth.getUserId();
 
-            await supabase.from('mensajes_meli').insert({
+            await supabase.from('mensajes_meli').upsert({
                 id: msgId,
                 id_conversacion: c.id,
                 remitente_tipo: 'vendedor',
                 remitente_id: sellerId,
                 contenido: texto,
+                ml_message_id: mlMessageId || null,
                 created_at: ahora
-            });
+            }, { onConflict: 'id' });
 
             // Calcular tiempo primera respuesta si aplica
             let tiempoPrimeraResp = c.tiempo_primera_respuesta_seg;
@@ -965,6 +1104,8 @@ export const moduloMensajes = {
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+            // Reactivar Realtime después de un breve delay para que los eventos pendientes se descarten
+            setTimeout(() => { enviandoRespuesta = false; }, 1500);
         }
     },
 
@@ -1009,12 +1150,22 @@ export const moduloMensajes = {
                 contexto.orden = conversacionSeleccionada.id_orden;
             }
 
+            // Detectar si ya hubo interacción previa del vendedor
+            const respuestasVendedor = mensajesActivos.filter(m => m.remitente_tipo === 'vendedor' && !m.es_nota_interna);
+            const esConversacionEnCurso = respuestasVendedor.length > 0;
+
+            // Armar mensaje con contexto de continuidad
+            let mensajeParaIA = msgCliente.contenido;
+            if (esConversacionEnCurso) {
+                mensajeParaIA = `[CONTEXTO: Esta es una conversación en curso, ya saludaste antes. NO vuelvas a saludar con "Hola", respondé directo.]\n\n${msgCliente.contenido}`;
+            }
+
             // Llamar al agente
             const resp = await fetch(AGENTE_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    mensaje: msgCliente.contenido,
+                    mensaje: mensajeParaIA,
                     contexto: { ...contexto, historial: historial.slice(0, -1) }, // excluir último (es el mismo mensaje)
                 })
             });
@@ -1040,8 +1191,12 @@ export const moduloMensajes = {
 
     usarSugerenciaIA: () => {
         if (!sugerenciaTexto) return;
-        document.getElementById('msg-input-texto').value = sugerenciaTexto;
+        const input = document.getElementById('msg-input-texto');
+        input.value = sugerenciaTexto;
         document.getElementById('msg-sugerencia-ia').classList.add('hidden');
+        input.focus();
+        // Poner cursor al final para que pueda editar
+        input.setSelectionRange(input.value.length, input.value.length);
     },
 
     descartarSugerenciaIA: () => {
@@ -1148,27 +1303,31 @@ export const moduloMensajes = {
         realtimeChannel = supabase
             .channel('mensajes-realtime')
             .on('postgres_changes', {
-                event: 'INSERT',
+                event: '*',
                 schema: 'public',
                 table: 'mensajes_meli'
             }, (payload) => {
+                // Ignorar eventos Realtime mientras enviamos una respuesta (evita render duplicado)
+                if (enviandoRespuesta) return;
                 const msg = payload.new;
-                // Si es de la conversación activa, agregar al thread
+                if (!msg) return;
+                // Si es de la conversación activa, recargar mensajes completos
                 if (conversacionSeleccionada && msg.id_conversacion === conversacionSeleccionada.id) {
-                    mensajesActivos.push(msg);
-                    moduloMensajes.pintarMensajes();
+                    moduloMensajes.cargarMensajesConversacion(conversacionSeleccionada.id);
                 }
                 // Recargar lista
                 moduloMensajes.cargarConversaciones();
             })
             .on('postgres_changes', {
-                event: 'UPDATE',
+                event: '*',
                 schema: 'public',
                 table: 'conversaciones_meli'
             }, () => {
                 moduloMensajes.cargarConversaciones();
             })
-            .subscribe();
+            .subscribe((status) => {
+                console.log('[Mensajes] Realtime status:', status);
+            });
     },
 
     // ---- CLEANUP ----
