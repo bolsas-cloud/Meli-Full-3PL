@@ -109,7 +109,7 @@ export const moduloAnaliticas = {
             { label: 'Tasa de Respuesta', value: `${t.tasa_respuesta}%`, sub: `${t.respondidas} de ${t.total_conversaciones}`, icon: 'fa-check-circle', color: t.tasa_respuesta >= 95 ? 'text-green-500' : t.tasa_respuesta >= 80 ? 'text-yellow-500' : 'text-red-500' },
             { label: 'Tiempo Promedio', value: `${t.avg_tiempo_resp_min} min`, sub: `Mediana: ${t.median_tiempo_resp_min} min`, icon: 'fa-clock', color: t.avg_tiempo_resp_min <= 30 ? 'text-green-500' : t.avg_tiempo_resp_min <= 120 ? 'text-yellow-500' : 'text-red-500' },
             { label: 'Sin Responder', value: formatearNumero(t.sin_responder), sub: t.sin_responder > 0 ? 'Requiere atención' : 'Todo respondido', icon: 'fa-exclamation-triangle', color: t.sin_responder > 0 ? 'text-red-500' : 'text-green-500' },
-            { label: 'Preguntas/Día', value: (t.preguntas / Math.max(filtroDias, 1)).toFixed(1), sub: `En ${filtroDias} días`, icon: 'fa-chart-line', color: 'text-purple-500' },
+            { label: 'Preguntas/Día', value: (t.preguntas / Math.max(filtroDias, 1)).toFixed(1), sub: `${t.preguntas} en ${filtroDias} días`, icon: 'fa-chart-line', color: 'text-purple-500' },
         ];
 
         container.innerHTML = kpiData.map(k => `
