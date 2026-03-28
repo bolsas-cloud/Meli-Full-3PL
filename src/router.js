@@ -15,6 +15,7 @@ import { moduloPYL } from './modules/pyl.js';
 import { moduloCostos } from './modules/costosRentabilidad.js';
 import { moduloMensajes } from './modules/mensajes.js';
 import { moduloKnowledgeBase } from './modules/knowledgeBase.js';
+import { moduloAnaliticas } from './modules/analiticas.js';
 
 // Módulo activo actual (para cleanup de realtime, timers, etc.)
 let moduloActivo = null;
@@ -47,6 +48,7 @@ export const router = {
             'costos': 'Costos y Rentabilidad',
             'mensajes': 'Mensajes ML',
             'knowledge': 'Base de Conocimiento',
+            'analiticas': 'Analíticas de Atención',
             'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
@@ -120,6 +122,11 @@ export const router = {
             case 'knowledge':
                 moduloKnowledgeBase.render(appContent);
                 moduloActivo = moduloKnowledgeBase;
+                break;
+
+            case 'analiticas':
+                moduloAnaliticas.render(appContent);
+                moduloActivo = moduloAnaliticas;
                 break;
 
             case 'depositos':

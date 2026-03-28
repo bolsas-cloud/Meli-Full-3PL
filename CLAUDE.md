@@ -42,6 +42,7 @@ Deploys to Vercel on push to `master`.
 | `apiMeli.js` | MercadoLibre API wrapper |
 | `mensajes.js` | Inbox unificado preguntas + mensajes ML, sincronización, respuestas rápidas |
 | `knowledgeBase.js` | CRUD de documentos para la base de conocimiento del agente IA (RAG) |
+| `analiticas.js` | Dashboard analíticas: KPIs atención, gráficos Chart.js, patrones, recomendaciones IA |
 
 ### Module Pattern
 ```javascript
@@ -90,6 +91,7 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `respuestas_rapidas` | Templates de respuestas rápidas con variables |
 | `knowledge_base` | Documentos de la base de conocimiento (RAG) |
 | `knowledge_chunks` | Fragmentos con embeddings vectoriales (pgvector 768d) |
+| `analisis_mensajes` | Insights y recomendaciones generados por análisis de patrones |
 
 ## Edge Functions (Supabase)
 
@@ -98,12 +100,12 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `meli-proxy` | Proxy CORS para ML API (browser no puede llamar directo) |
 | `meli-webhook` | Recibe notificaciones real-time de ML (questions + messages) |
 | `knowledge-processor` | RAG: chunking + embeddings (Gemini gemini-embedding-001) + vector search |
-| `meli-agente` | Agente IA con Gemini 2.0 Flash + 7 tools + agent loop |
+| `meli-agente` | Agente IA con Gemini 2.0 Flash + 8 tools + agent loop |
 
 ### Agente IA (meli-agente)
 
 - **Modelo**: Gemini 2.0 Flash (via `@google/genai`)
-- **7 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas
+- **8 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas
 - **System prompt**: vendedor ML, español rioplatense, nunca inventa datos
 - **Config**: tabla `config_meli` claves `ia_modelo`, `ia_temperatura`, `ia_max_tokens`, `ia_prompt`, `ia_reglas`
 - **RAG**: knowledge_base + knowledge_chunks con pgvector (768 dims, Gemini gemini-embedding-001)
@@ -162,4 +164,4 @@ La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="
 
 No incrementar para cambios puramente cosméticos, docs, o configuración.
 
-Currently v1.16.0.
+Currently v1.17.0.
