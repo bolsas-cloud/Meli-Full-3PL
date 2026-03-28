@@ -106,17 +106,17 @@ export const moduloPublicaciones = {
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full table-fixed divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-32">ID Pub.</th>
-                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-36">SKU</th>
-                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase w-24">Inv. ID</th>
-                                    <th class="px-2 py-3 text-left text-xs font-bold text-gray-500 uppercase max-w-xs">Título</th>
-                                    <th class="px-2 py-3 text-right text-xs font-bold text-gray-500 uppercase w-24">Precio</th>
-                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16">Stock</th>
-                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Logística</th>
-                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20">Estado</th>
-                                    <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase w-24">Acciones</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase w-32">ID Pub.</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase w-36">SKU</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase w-24">Inv. ID</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-bold text-gray-500 uppercase max-w-xs">Título</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-bold text-gray-500 uppercase w-24">Precio</th>
+                                    <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase w-16">Stock</th>
+                                    <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase w-24">Logística</th>
+                                    <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase w-20">Estado</th>
+                                    <th class="px-3 py-2.5 text-center text-xs font-bold text-gray-500 uppercase min-w-[100px]">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-publicaciones" class="divide-y divide-gray-100">
@@ -369,38 +369,38 @@ export const moduloPublicaciones = {
 
             return `
                 <tr class="hover:bg-gray-50 transition-colors">
-                    <td class="px-2 py-2">
+                    <td class="px-3 py-2.5">
                         <a href="${urlML}" target="_blank"
                            class="text-blue-600 hover:underline font-mono text-xs">
                             ${p.id_publicacion || '-'}
                         </a>
                     </td>
-                    <td class="px-2 py-2 font-mono text-xs ${skuClass}">${p.sku || '(sin SKU)'}</td>
-                    <td class="px-2 py-2 font-mono text-xs ${invClass}">${p.id_inventario || '(sin ID)'}</td>
-                    <td class="px-2 py-2 max-w-xs">
+                    <td class="px-3 py-2.5 font-mono text-xs ${skuClass}">${p.sku || '(sin SKU)'}</td>
+                    <td class="px-3 py-2.5 font-mono text-xs ${invClass}">${p.id_inventario || '(sin ID)'}</td>
+                    <td class="px-3 py-2.5 max-w-xs">
                         <div class="truncate text-sm" title="${(p.titulo || '').replace(/"/g, '&quot;')}">${p.titulo || '-'}</div>
                     </td>
-                    <td class="px-2 py-2 text-right font-medium text-sm">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
-                    <td class="px-2 py-2 text-center font-bold text-sm ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
-                    <td class="px-2 py-2 text-center">
+                    <td class="px-3 py-2.5 text-right font-medium text-sm">${p.precio ? formatearMoneda(p.precio) : '-'}</td>
+                    <td class="px-3 py-2.5 text-center font-bold text-sm ${(p.stock_full || 0) === 0 ? 'text-red-600' : 'text-gray-800'}">${p.stock_full || 0}</td>
+                    <td class="px-3 py-2.5 text-center">
                         <span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${logClase}">
                             ${p.tipo_logistica || '-'}
                         </span>
                     </td>
-                    <td class="px-2 py-2 text-center">
+                    <td class="px-3 py-2.5 text-center">
                         <span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${estClase}">
                             ${estTexto}
                         </span>
                     </td>
-                    <td class="px-2 py-2 text-center">
-                        <div class="flex items-center justify-center gap-1">
+                    <td class="px-3 py-2.5 text-center">
+                        <div class="flex items-center justify-center gap-2">
                             <button onclick="moduloPublicaciones.editarPublicacion('${p.id_publicacion}')"
-                                    class="p-1.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                                    class="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-500 hover:bg-blue-100 rounded-lg transition-colors"
                                     title="Editar SKU / Inventory ID">
-                                <i class="fas fa-edit text-xs"></i>
+                                <i class="fas fa-pen text-xs"></i>
                             </button>
                             <button onclick="moduloPublicaciones.confirmarEliminar('${p.id_publicacion}')"
-                                    class="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
+                                    class="w-8 h-8 flex items-center justify-center bg-red-50 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
                                     title="Eliminar publicación de la base de datos">
                                 <i class="fas fa-trash text-xs"></i>
                             </button>
