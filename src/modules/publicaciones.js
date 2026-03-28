@@ -264,7 +264,7 @@ export const moduloPublicaciones = {
         try {
             const { data, error } = await supabase
                 .from('publicaciones_meli')
-                .select('id_publicacion, sku, id_inventario, titulo, precio, stock_full, tipo_logistica, estado')
+                .select('id_publicacion, sku, id_inventario, titulo, precio, stock_full, tipo_logistica, estado, permalink, descripcion')
                 .order('titulo');
 
             if (error) throw error;
@@ -365,7 +365,7 @@ export const moduloPublicaciones = {
             const skuClass = p.sku ? '' : 'text-red-500 italic';
             const invClass = p.id_inventario ? '' : 'text-red-500 italic';
 
-            const urlML = `https://articulo.mercadolibre.com.ar/${p.id_publicacion}`;
+            const urlML = p.permalink || `https://www.mercadolibre.com.ar/${moduloPublicaciones.generarSlug(p.titulo || '')}/up/${p.id_publicacion}`;
 
             return `
                 <tr class="hover:bg-gray-50 transition-colors">
@@ -613,6 +613,22 @@ export const moduloPublicaciones = {
     },
 
     // ============================================
+    // GENERAR SLUG: URL amigable desde título
+    // ============================================
+    generarSlug: (titulo) => {
+        if (!titulo) return 'producto';
+        return titulo
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .substring(0, 60);
+    },
+
+    // ============================================
     // SINCRONIZAR: Traer datos desde ML
     // ============================================
     sincronizarML: async () => {
@@ -628,7 +644,6 @@ export const moduloPublicaciones = {
             if (data?.success) {
                 let mensaje = `Sincronizado: ${data.updated || 0} actualizadas`;
 
-                // Mostrar advertencia si hay publicaciones huérfanas
                 if (data.huerfanas > 0) {
                     mensaje += ` | ${data.huerfanas} no encontradas en ML`;
                     mostrarNotificacion(mensaje, 'warning');
@@ -636,6 +651,8 @@ export const moduloPublicaciones = {
                     mostrarNotificacion(mensaje, 'success');
                 }
 
+                // Sincronizar permalinks y descripciones de publicaciones sin datos
+                await moduloPublicaciones.sincronizarPermalinks();
                 await moduloPublicaciones.cargarPublicaciones();
             } else {
                 mostrarNotificacion('Sincronización completada', 'success');
@@ -646,6 +663,34 @@ export const moduloPublicaciones = {
             console.error('Error sincronizando:', error);
             mostrarNotificacion('Error al sincronizar con ML', 'error');
         }
+    },
+
+    // ============================================
+    // SYNC PERMALINKS: Traer permalink y descripción de ML
+    // ============================================
+    sincronizarPermalinks: async () => {
+        const sinPermalink = publicaciones.filter(p => !p.permalink);
+        if (sinPermalink.length === 0) return;
+
+        console.log(`[Publicaciones] Sincronizando ${sinPermalink.length} permalinks...`);
+        for (const p of sinPermalink) {
+            try {
+                const item = await mlFetch(`/items/${p.id_publicacion}?attributes=permalink`);
+                if (item?.permalink) {
+                    const updateData = { permalink: item.permalink };
+                    // También traer descripción si no tiene
+                    if (!p.descripcion) {
+                        try {
+                            const desc = await mlFetch(`/items/${p.id_publicacion}/description`);
+                            if (desc?.plain_text) updateData.descripcion = desc.plain_text;
+                        } catch (_e) {}
+                    }
+                    await supabase.from('publicaciones_meli').update(updateData).eq('id_publicacion', p.id_publicacion);
+                    p.permalink = item.permalink;
+                }
+            } catch (_e) { /* silenciar */ }
+        }
+        console.log(`[Publicaciones] Permalinks sincronizados`);
     },
 
     // ============================================
