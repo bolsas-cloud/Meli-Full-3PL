@@ -137,6 +137,14 @@ export const moduloMensajes = {
                     <span id="msg-badge-sin-leer" class="hidden bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <label class="flex items-center gap-2 cursor-pointer" title="Auto-respuesta IA para preguntas">
+                        <span class="text-xs text-gray-500 hidden sm:inline">Auto IA</span>
+                        <div class="relative inline-flex items-center">
+                            <input type="checkbox" id="toggle-autorespuesta" onchange="moduloMensajes.toggleAutorespuesta(this.checked)" class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-300 rounded-full peer peer-checked:bg-emerald-500 transition-colors"></div>
+                            <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-4 transition-transform"></div>
+                        </div>
+                    </label>
                     <button onclick="moduloMensajes.sincronizarHistorico()" id="btn-sync-historico"
                         class="px-3 py-1.5 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-2"
                         title="Traer todo el historial de preguntas y mensajes de ML">
@@ -273,6 +281,13 @@ export const moduloMensajes = {
         await moduloMensajes.cargarConversaciones();
         await moduloMensajes.cargarRespuestasRapidas();
         moduloMensajes.suscribirRealtime();
+
+        // Cargar estado auto-respuesta
+        try {
+            const { data: configAR } = await supabase.from('config_meli').select('valor').eq('clave', 'autorespuesta_activa').single();
+            const toggle = document.getElementById('toggle-autorespuesta');
+            if (toggle && configAR) toggle.checked = configAR.valor === 'true';
+        } catch (_e) {}
 
         window.moduloMensajes = moduloMensajes;
     },
@@ -489,13 +504,14 @@ export const moduloMensajes = {
             }
 
             const hora = new Date(m.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+            const badgeIA = m.origen_ia ? ' <i class="fas fa-robot text-emerald-400 ml-1" title="Respuesta con IA"></i>' : '';
 
             html += `<div class="flex ${esVendedor || esBot ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-[70%] ${esVendedor ? 'bg-brand text-white' : esBot ? 'bg-green-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} rounded-2xl px-4 py-2.5 shadow-sm">
                     ${esBot ? '<span class="text-[10px] opacity-75 block mb-1"><i class="fas fa-robot mr-1"></i>Bot</span>' : ''}
                     <p class="text-sm whitespace-pre-wrap">${m.contenido}</p>
                     <div class="flex items-center justify-end gap-1 mt-1">
-                        <span class="text-[10px] ${esVendedor || esBot ? 'text-white/60' : 'text-gray-400'}">${hora}</span>
+                        <span class="text-[10px] ${esVendedor || esBot ? 'text-white/60' : 'text-gray-400'}">${hora}${badgeIA}</span>
                         ${esVendedor || esBot ? '<i class="fas fa-check-double text-[10px] text-white/60"></i>' : ''}
                     </div>
                 </div>
@@ -612,6 +628,15 @@ export const moduloMensajes = {
         } catch (error) {
             console.error('Error:', error);
             mostrarNotificacion('Error al cambiar estado', 'error');
+        }
+    },
+
+    toggleAutorespuesta: async (activa) => {
+        try {
+            await supabase.from('config_meli').update({ valor: activa ? 'true' : 'false' }).eq('clave', 'autorespuesta_activa');
+            mostrarNotificacion(activa ? 'Auto-respuesta IA activada' : 'Auto-respuesta IA desactivada', activa ? 'success' : 'info');
+        } catch (error) {
+            mostrarNotificacion('Error al cambiar auto-respuesta', 'error');
         }
     },
 
@@ -1060,6 +1085,10 @@ export const moduloMensajes = {
             const ahora = new Date().toISOString();
             const sellerId = moduloAuth.getUserId();
 
+            const inputEl = document.getElementById('msg-input-texto');
+            const esIA = inputEl?.dataset?.origenIa === 'true';
+            if (inputEl) delete inputEl.dataset.origenIa;
+
             await supabase.from('mensajes_meli').upsert({
                 id: msgId,
                 id_conversacion: c.id,
@@ -1067,6 +1096,7 @@ export const moduloMensajes = {
                 remitente_id: sellerId,
                 contenido: texto,
                 ml_message_id: mlMessageId || null,
+                origen_ia: esIA,
                 created_at: ahora
             }, { onConflict: 'id' });
 
@@ -1080,6 +1110,7 @@ export const moduloMensajes = {
             // Actualizar conversación
             await supabase.from('conversaciones_meli').update({
                 respondido: true,
+                respondido_por: esIA ? 'ia_asistida' : 'humano',
                 ultimo_mensaje_at: ahora,
                 ultimo_mensaje_preview: truncar(texto, 100),
                 tiempo_primera_respuesta_seg: tiempoPrimeraResp,
@@ -1193,6 +1224,7 @@ export const moduloMensajes = {
         if (!sugerenciaTexto) return;
         const input = document.getElementById('msg-input-texto');
         input.value = sugerenciaTexto;
+        input.dataset.origenIa = 'true';
         document.getElementById('msg-sugerencia-ia').classList.add('hidden');
         input.focus();
         // Poner cursor al final para que pueda editar

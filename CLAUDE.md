@@ -100,12 +100,12 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `meli-proxy` | Proxy CORS para ML API (browser no puede llamar directo) |
 | `meli-webhook` | Recibe notificaciones real-time de ML (questions + messages) |
 | `knowledge-processor` | RAG: chunking + embeddings (Gemini gemini-embedding-001) + vector search |
-| `meli-agente` | Agente IA con Gemini 2.0 Flash + 8 tools + agent loop |
+| `meli-agente` | Agente IA con Gemini 2.0 Flash + 9 tools + agent loop + auto-respuesta |
 
 ### Agente IA (meli-agente)
 
 - **Modelo**: Gemini 2.0 Flash (via `@google/genai`)
-- **8 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas
+- **9 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas, reescribir_descripcion
 - **System prompt**: vendedor ML, español rioplatense, nunca inventa datos
 - **Config**: tabla `config_meli` claves `ia_modelo`, `ia_temperatura`, `ia_max_tokens`, `ia_prompt`, `ia_reglas`
 - **RAG**: knowledge_base + knowledge_chunks con pgvector (768 dims, Gemini gemini-embedding-001)
@@ -164,4 +164,4 @@ La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="
 
 No incrementar para cambios puramente cosméticos, docs, o configuración.
 
-Currently v1.17.0.
+Currently v1.18.0.

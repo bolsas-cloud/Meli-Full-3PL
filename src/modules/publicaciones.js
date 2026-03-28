@@ -8,6 +8,28 @@
 import { supabase } from '../config.js';
 import { mostrarNotificacion, formatearMoneda } from '../utils.js';
 
+const ML_PROXY = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-proxy';
+
+const mlFetch = async (endpoint, options = {}) => {
+    const method = options.method || 'GET';
+    const [path, queryString] = endpoint.split('?');
+    const url = new URL(ML_PROXY);
+    url.searchParams.set('endpoint', path);
+    if (queryString) {
+        const params = new URLSearchParams(queryString);
+        for (const [key, value] of params.entries()) {
+            url.searchParams.set(key, value);
+        }
+    }
+    const fetchOptions = { method };
+    if (options.body) {
+        fetchOptions.headers = { 'Content-Type': 'application/json' };
+        fetchOptions.body = options.body;
+    }
+    const resp = await fetch(url.toString(), fetchOptions);
+    return resp.json();
+};
+
 // Estado local del módulo
 let publicaciones = [];
 let filtros = {
@@ -131,7 +153,7 @@ export const moduloPublicaciones = {
             <div id="modal-editar-pub" class="fixed inset-0 z-50 hidden" aria-modal="true">
                 <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="moduloPublicaciones.cerrarModal()"></div>
                 <div class="fixed inset-0 z-10 overflow-y-auto p-4 flex items-center justify-center">
-                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg animate-fade-in">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-fade-in">
                         <div class="bg-brand text-white px-6 py-4 flex items-center justify-between rounded-t-xl">
                             <h3 id="modal-pub-titulo" class="font-bold text-lg">Editar Publicación</h3>
                             <button onclick="moduloPublicaciones.cerrarModal()" class="text-white/80 hover:text-white">
@@ -343,9 +365,7 @@ export const moduloPublicaciones = {
             const skuClass = p.sku ? '' : 'text-red-500 italic';
             const invClass = p.id_inventario ? '' : 'text-red-500 italic';
 
-            // Generar slug para URL de ML
-            const slug = moduloPublicaciones.generarSlug(p.titulo || '');
-            const urlML = `https://www.mercadolibre.com.ar/${slug}/p/${p.id_publicacion}`;
+            const urlML = `https://articulo.mercadolibre.com.ar/${p.id_publicacion}`;
 
             return `
                 <tr class="hover:bg-gray-50 transition-colors">
@@ -424,7 +444,7 @@ export const moduloPublicaciones = {
     // ============================================
     // EDITAR: Abrir modal de edición
     // ============================================
-    editarPublicacion: (idPub) => {
+    editarPublicacion: async (idPub) => {
         const pub = publicaciones.find(p => p.id_publicacion === idPub);
         if (!pub) {
             mostrarNotificacion('Publicación no encontrada', 'error');
@@ -446,21 +466,26 @@ export const moduloPublicaciones = {
                         <input type="text" id="edit-sku" value="${pub.sku || ''}"
                                placeholder="Ej: LAC101500XACRC050"
                                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent font-mono">
-                        <p class="text-xs text-gray-500 mt-1">Código del vendedor (seller_custom_field)</p>
                     </div>
-
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Inventory ID</label>
                         <input type="text" id="edit-inventory" value="${pub.id_inventario || ''}"
                                placeholder="Ej: JWZL70892"
                                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand focus:border-transparent font-mono">
-                        <p class="text-xs text-gray-500 mt-1">ID de inventario Full de ML</p>
                     </div>
                 </div>
 
-                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
-                    <i class="fas fa-info-circle mr-1"></i>
-                    Estos cambios son locales. Para actualizar en ML, usa la API.
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-sm font-medium text-gray-700">Descripción</label>
+                        <button onclick="moduloPublicaciones.reescribirConIA()" id="btn-reescribir-ia"
+                            class="px-2.5 py-1 bg-emerald-500 text-white text-xs rounded-lg hover:bg-emerald-600 transition-colors flex items-center gap-1">
+                            <i class="fas fa-magic"></i> Reescribir con IA
+                        </button>
+                    </div>
+                    <textarea id="edit-descripcion" rows="10" placeholder="Cargando descripción..."
+                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand focus:border-transparent resize-y">${pub.descripcion || ''}</textarea>
+                    <p class="text-xs text-gray-500 mt-1">Al guardar se actualiza en MercadoLibre</p>
                 </div>
 
                 <input type="hidden" id="edit-id-pub" value="${pub.id_publicacion}">
@@ -468,6 +493,20 @@ export const moduloPublicaciones = {
         `;
 
         document.getElementById('modal-editar-pub').classList.remove('hidden');
+
+        // Si no tiene descripción cargada, traerla de ML
+        if (!pub.descripcion) {
+            try {
+                const descData = await mlFetch(`/items/${pub.id_publicacion}/description`);
+                if (descData?.plain_text) {
+                    pub.descripcion = descData.plain_text;
+                    document.getElementById('edit-descripcion').value = descData.plain_text;
+                    await supabase.from('publicaciones_meli')
+                        .update({ descripcion: descData.plain_text })
+                        .eq('id_publicacion', pub.id_publicacion);
+                }
+            } catch (_e) { /* silenciar */ }
+        }
     },
 
     // ============================================
@@ -478,36 +517,89 @@ export const moduloPublicaciones = {
     },
 
     // ============================================
+    // REESCRIBIR CON IA: Usar agente para mejorar descripción
+    // ============================================
+    reescribirConIA: async () => {
+        const idPub = document.getElementById('edit-id-pub').value;
+        const descripcionActual = document.getElementById('edit-descripcion').value;
+        const btn = document.getElementById('btn-reescribir-ia');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Reescribiendo...';
+
+        try {
+            const AGENTE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-agente';
+            const resp = await fetch(AGENTE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mensaje: `Reescribí la descripción de la publicación ${idPub}. Descripción actual: "${descripcionActual}"`,
+                })
+            });
+            const data = await resp.json();
+
+            if (data.error) throw new Error(data.error);
+            if (data.texto) {
+                document.getElementById('edit-descripcion').value = data.texto;
+                mostrarNotificacion('Descripción reescrita por IA. Revisá y guardá.', 'success');
+            }
+        } catch (error) {
+            console.error('Error reescribiendo:', error);
+            mostrarNotificacion('Error: ' + error.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-magic"></i> Reescribir con IA';
+        }
+    },
+
+    // ============================================
     // GUARDAR: Cambios de edición
     // ============================================
     guardarEdicion: async () => {
         const idPub = document.getElementById('edit-id-pub').value;
         const nuevoSku = document.getElementById('edit-sku').value.trim().toUpperCase() || null;
         const nuevoInventory = document.getElementById('edit-inventory').value.trim().toUpperCase() || null;
+        const nuevaDescripcion = document.getElementById('edit-descripcion').value.trim();
 
         const btnGuardar = document.getElementById('btn-guardar-pub');
         btnGuardar.disabled = true;
         btnGuardar.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Guardando...';
 
         try {
+            const updateData = { sku: nuevoSku, id_inventario: nuevoInventory };
+            if (nuevaDescripcion) updateData.descripcion = nuevaDescripcion;
+
             const { error } = await supabase
                 .from('publicaciones_meli')
-                .update({
-                    sku: nuevoSku,
-                    id_inventario: nuevoInventory
-                })
+                .update(updateData)
                 .eq('id_publicacion', idPub);
 
             if (error) throw error;
 
-            // Actualizar en memoria
+            if (nuevaDescripcion) {
+                try {
+                    const resp = await mlFetch(`/items/${idPub}/description`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ plain_text: nuevaDescripcion })
+                    });
+                    if (resp.error) {
+                        mostrarNotificacion('Guardado local OK, pero error al publicar en ML: ' + (resp.message || resp.error), 'warning');
+                    } else {
+                        mostrarNotificacion('Descripción guardada y publicada en ML', 'success');
+                    }
+                } catch (mlErr) {
+                    mostrarNotificacion('Guardado local OK, error al publicar en ML', 'warning');
+                }
+            } else {
+                mostrarNotificacion('Publicación actualizada', 'success');
+            }
+
             const pub = publicaciones.find(p => p.id_publicacion === idPub);
             if (pub) {
                 pub.sku = nuevoSku;
                 pub.id_inventario = nuevoInventory;
+                if (nuevaDescripcion) pub.descripcion = nuevaDescripcion;
             }
 
-            mostrarNotificacion('Publicación actualizada', 'success');
             moduloPublicaciones.cerrarModal();
             moduloPublicaciones.pintarTabla();
 
@@ -518,23 +610,6 @@ export const moduloPublicaciones = {
             btnGuardar.disabled = false;
             btnGuardar.innerHTML = '<i class="fas fa-save"></i> Guardar';
         }
-    },
-
-    // ============================================
-    // GENERAR SLUG: Crear URL amigable desde título
-    // ============================================
-    generarSlug: (titulo) => {
-        if (!titulo) return 'producto';
-
-        return titulo
-            .toLowerCase()
-            .normalize('NFD')                          // Separar acentos
-            .replace(/[\u0300-\u036f]/g, '')           // Eliminar acentos
-            .replace(/[^a-z0-9\s-]/g, '')              // Solo letras, números, espacios y guiones
-            .replace(/\s+/g, '-')                      // Espacios a guiones
-            .replace(/-+/g, '-')                       // Múltiples guiones a uno
-            .replace(/^-|-$/g, '')                     // Eliminar guiones al inicio/fin
-            .substring(0, 60);                         // Limitar longitud
     },
 
     // ============================================

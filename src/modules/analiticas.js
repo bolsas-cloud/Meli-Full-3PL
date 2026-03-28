@@ -276,10 +276,16 @@ export const moduloAnaliticas = {
                         <p class="text-sm font-medium text-gray-800">${r.titulo}</p>
                         <p class="text-xs text-gray-600 mt-1 whitespace-pre-wrap">${r.detalle || ''}</p>
                     </div>
-                    <button onclick="moduloAnaliticas.descartarRecomendacion('${r.id}')"
-                        class="text-gray-400 hover:text-gray-600 p-1 flex-shrink-0" title="Descartar">
-                        <i class="fas fa-times text-xs"></i>
-                    </button>
+                    <div class="flex items-center gap-1 flex-shrink-0">
+                        <button onclick="moduloAnaliticas.guardarEnKB('${r.id}')"
+                            class="text-emerald-400 hover:text-emerald-600 p-1" title="Guardar en Base de Conocimiento">
+                            <i class="fas fa-brain text-xs"></i>
+                        </button>
+                        <button onclick="moduloAnaliticas.descartarRecomendacion('${r.id}')"
+                            class="text-gray-400 hover:text-gray-600 p-1" title="Descartar">
+                            <i class="fas fa-times text-xs"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -294,6 +300,36 @@ export const moduloAnaliticas = {
         await supabase.from('analisis_mensajes').update({ estado: 'descartada' }).eq('id', id);
         recomendaciones = recomendaciones.filter(r => r.id !== id);
         moduloAnaliticas.pintarRecomendaciones();
+    },
+
+    guardarEnKB: async (id) => {
+        const rec = recomendaciones.find(r => r.id === id);
+        if (!rec) return;
+
+        try {
+            const KP_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/knowledge-processor';
+            const resp = await fetch(KP_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'procesar',
+                    titulo: rec.titulo,
+                    categoria: 'insight_agente',
+                    contenido: rec.detalle || rec.titulo,
+                })
+            });
+            const data = await resp.json();
+
+            if (data.error) throw new Error(data.error);
+
+            await supabase.from('analisis_mensajes').update({ estado: 'aplicada' }).eq('id', id);
+            recomendaciones = recomendaciones.filter(r => r.id !== id);
+            moduloAnaliticas.pintarRecomendaciones();
+            mostrarNotificacion('Guardado en Base de Conocimiento', 'success');
+        } catch (error) {
+            console.error('Error guardando en KB:', error);
+            mostrarNotificacion('Error: ' + error.message, 'error');
+        }
     },
 
     generarAnalisis: async () => {
