@@ -65,6 +65,9 @@ supabase
     })
     .subscribe();
 
+// Polling de respaldo cada 2 minutos (por si el Realtime se cae)
+setInterval(() => { actualizarBadgeSidebar(); }, 120000);
+
 // ---- Agente IA ----
 const AGENTE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-agente';
 let sugerenciaTexto = '';
