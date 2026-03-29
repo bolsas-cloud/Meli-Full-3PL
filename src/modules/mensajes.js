@@ -68,6 +68,13 @@ supabase
 // Polling de respaldo cada 2 minutos (por si el Realtime se cae)
 setInterval(() => { actualizarBadgeSidebar(); }, 120000);
 
+// Al volver a la pestaña, refrescar badge (Chrome throttlea WebSockets en background)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        actualizarBadgeSidebar();
+    }
+});
+
 // ---- Agente IA ----
 const AGENTE_URL = 'https://cpwsdpzxzhlmozzasnqx.supabase.co/functions/v1/meli-agente';
 let sugerenciaTexto = '';
@@ -284,6 +291,19 @@ export const moduloMensajes = {
         await moduloMensajes.cargarConversaciones();
         await moduloMensajes.cargarRespuestasRapidas();
         moduloMensajes.suscribirRealtime();
+
+        // Al volver a la pestaña, recargar conversaciones y mensajes activos
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                moduloMensajes.cargarConversaciones();
+                if (conversacionSeleccionada) {
+                    moduloMensajes.cargarMensajesConversacion(conversacionSeleccionada.id);
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        // Guardar para cleanup
+        moduloMensajes._cleanupVisibility = onVisibility;
 
         // Cargar estado auto-respuesta
         try {
@@ -1370,6 +1390,10 @@ export const moduloMensajes = {
         if (realtimeChannel) {
             supabase.removeChannel(realtimeChannel);
             realtimeChannel = null;
+        }
+        if (moduloMensajes._cleanupVisibility) {
+            document.removeEventListener('visibilitychange', moduloMensajes._cleanupVisibility);
+            moduloMensajes._cleanupVisibility = null;
         }
         // Restaurar padding del contenedor
         const contenedor = document.getElementById('app-content');
