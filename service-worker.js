@@ -1,7 +1,8 @@
 // ============================================
-// SERVICE WORKER - PWA Offline Support
+// SERVICE WORKER - PWA Offline Support + Auto-Update
 // ============================================
-const CACHE_NAME = 'meli-full-3pl-v1';
+const CACHE_VERSION = 18; // Incrementar con cada deploy
+const CACHE_NAME = `meli-full-3pl-v${CACHE_VERSION}`;
 
 const ASSETS_TO_CACHE = [
     '/',
@@ -11,38 +12,33 @@ const ASSETS_TO_CACHE = [
     '/src/main.js',
     '/src/config.js',
     '/src/router.js',
-    '/src/utils.js',
-    '/src/modules/calculadoraEnvios.js',
-    '/src/modules/auth.js'
+    '/src/utils.js'
 ];
 
-// Instalación
+// Instalación — cachea assets y toma control inmediato
 self.addEventListener('install', (event) => {
-    console.log('Service Worker: Instalando...');
+    console.log(`Service Worker v${CACHE_VERSION}: Instalando...`);
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then((cache) => {
-                console.log('Service Worker: Cacheando archivos');
-                return cache.addAll(ASSETS_TO_CACHE);
-            })
+            .then((cache) => cache.addAll(ASSETS_TO_CACHE))
             .then(() => self.skipWaiting())
     );
 });
 
-// Activación
+// Activación — limpia caches viejas y toma control de todas las pestañas
 self.addEventListener('activate', (event) => {
-    console.log('Service Worker: Activado');
+    console.log(`Service Worker v${CACHE_VERSION}: Activado`);
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
-                cacheNames.map((cache) => {
-                    if (cache !== CACHE_NAME) {
-                        console.log('Service Worker: Limpiando caché antigua');
+                cacheNames
+                    .filter((cache) => cache !== CACHE_NAME)
+                    .map((cache) => {
+                        console.log('Service Worker: Limpiando caché:', cache);
                         return caches.delete(cache);
-                    }
-                })
+                    })
             );
-        })
+        }).then(() => self.clients.claim())
     );
 });
 

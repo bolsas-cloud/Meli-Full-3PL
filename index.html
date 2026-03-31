@@ -322,12 +322,28 @@
       }
     </script>
 
-    <!-- PWA Service Worker Registration -->
+    <!-- PWA Service Worker Registration + Auto-Update -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('./service-worker.js')
-            .then(reg => console.log('Service Worker registrado:', reg.scope))
+            .then(reg => {
+              console.log('Service Worker registrado:', reg.scope);
+              // Chequear actualizaciones cada 5 minutos
+              setInterval(() => reg.update(), 5 * 60 * 1000);
+              // Cuando hay un SW nuevo esperando, activarlo y recargar
+              reg.addEventListener('updatefound', () => {
+                const newWorker = reg.installing;
+                if (newWorker) {
+                  newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                      console.log('Service Worker actualizado, recargando...');
+                      window.location.reload();
+                    }
+                  });
+                }
+              });
+            })
             .catch(err => console.log('Error registrando SW:', err));
         });
       }
