@@ -100,11 +100,11 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `meli-proxy` | Proxy CORS para ML API (browser no puede llamar directo) |
 | `meli-webhook` | Recibe notificaciones real-time de ML (questions + messages) |
 | `knowledge-processor` | RAG: chunking + embeddings (Gemini gemini-embedding-001) + vector search |
-| `meli-agente` | Agente IA con Gemini 2.0 Flash + 9 tools + agent loop + auto-respuesta |
+| `meli-agente` | Agente IA con Gemini 3 Flash Preview + 9 tools + agent loop + auto-respuesta |
 
 ### Agente IA (meli-agente)
 
-- **Modelo**: Gemini 2.0 Flash (via `@google/genai`)
+- **Modelo**: Gemini 3 Flash Preview (via `@google/genai`), configurable en `config_meli.ia_modelo`
 - **9 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas, reescribir_descripcion
 - **System prompt**: vendedor ML, español rioplatense, nunca inventa datos
 - **Config**: tabla `config_meli` claves `ia_modelo`, `ia_temperatura`, `ia_max_tokens`, `ia_prompt`, `ia_reglas`
