@@ -194,7 +194,10 @@ export const moduloPYL = {
                 const comisiones = Math.abs(billing?.total_comisiones || 0);
                 const cargosFijos = Math.abs(billing?.total_cargos_fijos || 0);
                 const envios = Math.abs(billing?.total_envios || 0);
-                const publicidad = Math.abs(billing?.total_publicidad || 0) || gastoAds;
+                // Prioridad: billing_periodos (fuente oficial ML) > costos_publicidad (sync diario, fallback)
+                // Evita double-counting si ambas fuentes tienen datos para el mismo periodo
+                const publicidadBilling = Math.abs(billing?.total_publicidad || 0);
+                const publicidad = publicidadBilling > 0 ? publicidadBilling : gastoAds;
                 const impuestos = Math.abs(billing?.total_impuestos || 0);
                 const totalCostosML = comisiones + cargosFijos + envios + publicidad + impuestos;
                 const margen = ventas - cogs - totalCostosML;

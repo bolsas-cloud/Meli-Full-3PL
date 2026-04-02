@@ -17,6 +17,8 @@ let configCalc = {
     pctImpuestos: 3,     // % retenciones impositivas (IIBB, SIRTAC, IVA)
     margenObjetivo: 25   // % margen neto sobre COSTO (no sobre precio)
 };
+let adsPorSku = {};      // gasto real publicidad 30 dias por SKU
+let ventasPorSku = {};   // unidades vendidas 30 dias por SKU
 let sortCol = 'margen_pct';
 let sortAsc = true;
 let filtroBusqueda = '';
@@ -114,6 +116,7 @@ export const moduloCostos = {
                             </button>
                         </div>
                     </div>
+                    <div id="costos-cogs-warning"></div>
                     <div class="overflow-x-auto">
                         <table class="min-w-full">
                             <thead class="bg-gray-50">
@@ -214,7 +217,12 @@ export const moduloCostos = {
     cargarDatos: async () => {
         try {
             // Cargar todo en paralelo
-            const [pubRes, prodRes, envioRes, fijosRes, umbralesRes] = await Promise.all([
+            // Fecha 30 dias atras para ads y ventas
+            const hace30dias = new Date();
+            hace30dias.setDate(hace30dias.getDate() - 30);
+            const fechaDesde30d = hace30dias.toISOString().split('T')[0];
+
+            const [pubRes, prodRes, envioRes, fijosRes, umbralesRes, adsRes, ventasRes] = await Promise.all([
                 // 1. Publicaciones ML con costos ML + peso y envio gratis
                 supabase
                     .from('publicaciones_meli')
@@ -242,11 +250,33 @@ export const moduloCostos = {
                 // 5. Umbrales
                 supabase
                     .from('config_umbrales_ml')
-                    .select('*')
+                    .select('*'),
+                // 6. Gasto real publicidad ultimos 30 dias por SKU
+                supabase
+                    .from('ads_metricas_diarias')
+                    .select('sku, costo')
+                    .gte('fecha', fechaDesde30d),
+                // 7. Ventas ultimos 30 dias por SKU (para calcular costo publi por unidad)
+                supabase
+                    .from('ordenes_meli')
+                    .select('sku, cantidad')
+                    .gte('fecha_creacion', fechaDesde30d)
             ]);
 
             const pubData = pubRes.data;
             const prodData = prodRes.data;
+
+            // Indexar gasto real de publicidad por SKU (suma 30 dias)
+            adsPorSku = {};
+            (adsRes.data || []).forEach(a => {
+                if (a.sku) adsPorSku[a.sku] = (adsPorSku[a.sku] || 0) + parseFloat(a.costo || 0);
+            });
+
+            // Indexar unidades vendidas por SKU (suma 30 dias)
+            ventasPorSku = {};
+            (ventasRes.data || []).forEach(v => {
+                if (v.sku) ventasPorSku[v.sku] = (ventasPorSku[v.sku] || 0) + (parseInt(v.cantidad) || 1);
+            });
 
             // Procesar config envio y fijos
             if (envioRes.data?.length > 0) configCostosEnvio = envioRes.data;
@@ -317,7 +347,13 @@ export const moduloCostos = {
                     }
                 }
 
-                const publiEst = precio * (configCalc.pctPublicidad / 100);
+                // Publicidad: usar gasto real de ads si hay datos, sino estimar con %
+                const adsReal = adsPorSku[p.sku] || 0;
+                const unidadesVendidas = ventasPorSku[p.sku] || 0;
+                const publiEst = (adsReal > 0 && unidadesVendidas > 0)
+                    ? adsReal / unidadesVendidas
+                    : precio * (configCalc.pctPublicidad / 100);
+                const publiOrigen = (adsReal > 0 && unidadesVendidas > 0) ? 'real' : 'estimado';
                 const totalDescuentos = comisionMl + cargoFijo + costoEnvio + impuestos + publiEst;
                 const margen = precio - costo - totalDescuentos;
                 const margenPct = costo > 0 ? (margen / costo) * 100 : 0;
@@ -333,6 +369,7 @@ export const moduloCostos = {
                     envio: costoEnvio,
                     impuestos,
                     publi_est: publiEst,
+                    publi_origen: publiOrigen,
                     margen,
                     margen_pct: margenPct,
                     estado: p.estado,
@@ -379,7 +416,16 @@ export const moduloCostos = {
             p.envio = p.tiene_envio_gratis
                 ? moduloCostos.calcularCostoEnvio(p.peso_gr, p.precio)
                 : 0;
-            p.publi_est = p.precio * (configCalc.pctPublicidad / 100);
+            // Publicidad: mantener gasto real si hay datos, sino recalcular con %
+            const adsReal = adsPorSku[p.sku] || 0;
+            const unidadesVendidas = ventasPorSku[p.sku] || 0;
+            if (adsReal > 0 && unidadesVendidas > 0) {
+                p.publi_est = adsReal / unidadesVendidas;
+                p.publi_origen = 'real';
+            } else {
+                p.publi_est = p.precio * (configCalc.pctPublicidad / 100);
+                p.publi_origen = 'estimado';
+            }
             p.promo_est = p.precio * (configCalc.pctPromocion / 100);
             p.imp_est = p.precio * (configCalc.pctImpuestos / 100);
             const totalDescuentos = p.comision_ml + p.cargo_fijo + p.envio + p.impuestos + p.publi_est;
@@ -523,6 +569,26 @@ export const moduloCostos = {
         const countEl = document.getElementById('costos-count');
         if (countEl) countEl.textContent = `${items.length} publicaciones`;
 
+        // Warning COGS coverage
+        const warningEl = document.getElementById('costos-cogs-warning');
+        if (warningEl) {
+            const sinCosto = items.filter(p => p.costo === 0);
+            if (sinCosto.length > 0) {
+                const skusSinCosto = sinCosto.map(p => p.sku);
+                const skusDisplay = skusSinCosto.length > 10
+                    ? skusSinCosto.slice(0, 10).join(', ') + ` (+${skusSinCosto.length - 10} mas)`
+                    : skusSinCosto.join(', ');
+                warningEl.innerHTML = `
+                    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800 mx-4 mt-4">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        <strong>${sinCosto.length} de ${items.length} productos sin costo de produccion</strong> — sus margenes aparecen inflados.
+                        <span class="text-xs text-amber-600 ml-1">SKUs: ${skusDisplay}</span>
+                    </div>`;
+            } else {
+                warningEl.innerHTML = '';
+            }
+        }
+
         const fmt = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
         const indicador = (col) => sortCol === col ? (sortAsc ? ' ▲' : ' ▼') : '';
 
@@ -572,7 +638,7 @@ export const moduloCostos = {
                     <td class="px-3 py-2.5 text-right text-[11px] text-red-500 align-middle">${p.cargo_fijo > 0 ? '$ ' + fmt(p.cargo_fijo) : '<span class="text-gray-300">-</span>'}</td>
                     <td class="px-3 py-2.5 text-right text-[11px] text-orange-500 align-middle">${p.envio > 0 ? '$ ' + fmt(p.envio) : '<span class="text-gray-300">-</span>'}</td>
                     <td class="px-3 py-2.5 text-right text-[11px] text-red-500 align-middle">${p.impuestos > 0 ? '$ ' + fmt(p.impuestos) : '<span class="text-gray-300">-</span>'}</td>
-                    <td class="px-3 py-2.5 text-right text-[11px] text-purple-500 align-middle">$ ${fmt(p.publi_est)}</td>
+                    <td class="px-3 py-2.5 text-right text-[11px] text-purple-500 align-middle">$ ${fmt(p.publi_est)}${p.publi_origen === 'real' ? ' <span class="text-[9px] text-green-500" title="Gasto real de ads ultimos 30 dias / unidades vendidas">real</span>' : ''}</td>
                     <td class="px-3 py-2.5 text-right text-[11px] font-semibold ${margenColor} align-middle">$ ${fmt(p.margen)}</td>
                     <td class="px-3 py-2.5 text-right text-[11px] font-bold ${margenColor} align-middle">${p.margen_pct.toFixed(1)}%</td>
                     <td class="px-3 py-2.5 text-right text-[11px] align-middle">${sugeridoDisplay}${diffTag}</td>
@@ -700,7 +766,7 @@ ${items.map(p => {
         <td>${p.cargo_fijo > 0 ? '$ ' + fmt(p.cargo_fijo) : '-'}</td>
         <td class="amber">${p.envio > 0 ? '$ ' + fmt(p.envio) : '-'}</td>
         <td>${p.impuestos > 0 ? '$ ' + fmt(p.impuestos) : '-'}</td>
-        <td class="purple">$ ${fmt(p.publi_est)}</td>
+        <td class="purple">$ ${fmt(p.publi_est)}${p.publi_origen === 'real' ? ' <span style="font-size:6px;color:#16a34a;">real</span>' : ''}</td>
         <td class="${margenClass}" style="font-weight:600">$ ${fmt(p.margen)}</td>
         <td class="${margenClass}" style="font-weight:700">${p.costo > 0 ? p.margen_pct.toFixed(1) + '%' : '-'}</td>
         <td>${sugeridoTxt}</td>
