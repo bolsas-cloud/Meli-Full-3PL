@@ -49,6 +49,7 @@ export const router = {
             'mensajes': 'Mensajes ML',
             'knowledge': 'Base de Conocimiento',
             'analiticas': 'Analíticas de Atención',
+            'trafico': 'Tráfico y Visitas',
             'depositos': 'Depósitos de Envío'
         };
         document.getElementById('page-title').innerText = titulos[ruta] || 'Meli Full 3PL';
@@ -66,6 +67,11 @@ export const router = {
                 el.classList.remove('bg-white/20', 'font-bold');
             }
         });
+
+        // 3b. Auto-expandir sección del módulo activo en sidebar
+        if (window.sidebarSections && window.sidebarSections[ruta] && typeof expandSection === 'function') {
+            expandSection(window.sidebarSections[ruta]);
+        }
 
         // 4. Cargar el módulo correspondiente
         switch(ruta) {
@@ -131,6 +137,10 @@ export const router = {
 
             case 'depositos':
                 moduloDepositos.render(appContent);
+                break;
+
+            case 'trafico':
+                appContent.innerHTML = '<div class="p-8 text-center text-gray-400"><i class="fas fa-eye fa-3x mb-4"></i><p class="text-lg">Módulo de Tráfico en construcción</p><p class="text-sm mt-2">Se implementará con el plan de visitas</p></div>';
                 break;
 
             default:
