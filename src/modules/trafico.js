@@ -41,6 +41,12 @@ export const moduloTrafico = {
                 </div>
             </div>
 
+            <!-- Info actualización -->
+            <div class="flex items-center justify-between text-xs text-gray-500 bg-white rounded-lg px-4 py-2 border border-gray-200">
+                <span id="traf-info-periodo">Mostrando: últimos <span id="traf-dias-label">30</span> días</span>
+                <span id="traf-info-actualizacion"><i class="fas fa-clock mr-1"></i>Cargando...</span>
+            </div>
+
             <!-- KPIs -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="traf-kpis">
                 <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 animate-pulse"><div class="h-4 bg-gray-200 rounded w-3/4 mb-3"></div><div class="h-8 bg-gray-200 rounded w-1/2"></div></div>
@@ -133,10 +139,31 @@ export const moduloTrafico = {
             moduloTrafico.pintarChartVisitas();
             moduloTrafico.pintarTablaPublicaciones();
             moduloTrafico.pintarEventos();
+            moduloTrafico.actualizarInfoSync();
+
+            const diasLabel = document.getElementById('traf-dias-label');
+            if (diasLabel) diasLabel.textContent = filtroDias;
         } catch (error) {
             console.error('Error cargando tráfico:', error);
             mostrarNotificacion('Error al cargar tráfico: ' + error.message, 'error');
         }
+    },
+
+    actualizarInfoSync: async () => {
+        const infoEl = document.getElementById('traf-info-actualizacion');
+        if (!infoEl) return;
+        try {
+            const { data } = await supabase
+                .from('visitas_historial')
+                .select('created_at')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            if (data && data.length > 0) {
+                infoEl.innerHTML = `<i class="fas fa-clock mr-1"></i>Última sync: ${formatearFecha(data[0].created_at)} ${new Date(data[0].created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+            } else {
+                infoEl.innerHTML = '<i class="fas fa-exclamation-triangle mr-1 text-amber-500"></i>Sin datos. Sincronizá desde el Dashboard.';
+            }
+        } catch (_e) {}
     },
 
     pintarKPIs: () => {
