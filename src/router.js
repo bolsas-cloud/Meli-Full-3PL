@@ -16,6 +16,7 @@ import { moduloCostos } from './modules/costosRentabilidad.js';
 import { moduloMensajes } from './modules/mensajes.js';
 import { moduloKnowledgeBase } from './modules/knowledgeBase.js';
 import { moduloAnaliticas } from './modules/analiticas.js';
+import { moduloTrafico } from './modules/trafico.js';
 
 // Módulo activo actual (para cleanup de realtime, timers, etc.)
 let moduloActivo = null;
@@ -140,7 +141,8 @@ export const router = {
                 break;
 
             case 'trafico':
-                appContent.innerHTML = '<div class="p-8 text-center text-gray-400"><i class="fas fa-eye fa-3x mb-4"></i><p class="text-lg">Módulo de Tráfico en construcción</p><p class="text-sm mt-2">Se implementará con el plan de visitas</p></div>';
+                moduloTrafico.render(appContent);
+                moduloActivo = moduloTrafico;
                 break;
 
             default:

@@ -92,6 +92,10 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `knowledge_base` | Documentos de la base de conocimiento (RAG) |
 | `knowledge_chunks` | Fragmentos con embeddings vectoriales (pgvector 768d) |
 | `analisis_mensajes` | Insights y recomendaciones generados por análisis de patrones |
+| `visitas_historial` | Historial diario de visitas por publicación (fecha + id_publicacion UNIQUE) |
+| `performance_publicaciones` | Score de calidad ML y recomendaciones por publicación |
+| `tendencias_ml` | Top keywords de MercadoLibre por semana |
+| `eventos_tienda` | Marcadores de eventos manuales y automáticos (promociones, precios, stock) |
 
 ## Edge Functions (Supabase)
 
@@ -100,12 +104,12 @@ This is part of a multi-project ecosystem sharing data across 4 Supabase instanc
 | `meli-proxy` | Proxy CORS para ML API (browser no puede llamar directo) |
 | `meli-webhook` | Recibe notificaciones real-time de ML (questions + messages) |
 | `knowledge-processor` | RAG: chunking + embeddings (Gemini gemini-embedding-001) + vector search |
-| `meli-agente` | Agente IA con Gemini 3 Flash Preview + 9 tools + agent loop + auto-respuesta |
+| `meli-agente` | Agente IA con Gemini 3 Flash Preview + 10 tools + agent loop + auto-respuesta |
 
 ### Agente IA (meli-agente)
 
 - **Modelo**: Gemini 3 Flash Preview (via `@google/genai`), configurable en `config_meli.ia_modelo`
-- **9 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas, reescribir_descripcion
+- **10 tools**: consultar_stock, buscar_publicacion, consultar_orden, consultar_envio, consultar_precio, buscar_conocimiento, obtener_metricas, detectar_patrones_preguntas, reescribir_descripcion, analizar_publicacion
 - **System prompt**: vendedor ML, español rioplatense, nunca inventa datos
 - **Config**: tabla `config_meli` claves `ia_modelo`, `ia_temperatura`, `ia_max_tokens`, `ia_prompt`, `ia_reglas`
 - **RAG**: knowledge_base + knowledge_chunks con pgvector (768 dims, Gemini gemini-embedding-001)
@@ -164,4 +168,4 @@ La versión se muestra en el sidebar (`index.html`, línea ~156): `<span class="
 
 No incrementar para cambios puramente cosméticos, docs, o configuración.
 
-Currently v1.19.0.
+Currently v1.20.0.
