@@ -230,27 +230,26 @@ export const moduloTrafico = {
             <table class="w-full text-xs">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-2 py-2 text-left font-bold text-gray-500">#</th>
+                        <th class="px-2 py-2 text-left font-bold text-gray-500 w-8">#</th>
                         <th class="px-2 py-2 text-left font-bold text-gray-500">Publicación</th>
-                        <th class="px-2 py-2 text-right font-bold text-gray-500">Visitas</th>
-                        <th class="px-2 py-2 text-right font-bold text-gray-500">Órdenes</th>
-                        <th class="px-2 py-2 text-right font-bold text-gray-500">Conv.</th>
-                        <th class="px-2 py-2 text-center font-bold text-gray-500">Score</th>
+                        <th class="px-2 py-2 text-right font-bold text-gray-500 whitespace-nowrap w-16">Visitas</th>
+                        <th class="px-2 py-2 text-right font-bold text-gray-500 whitespace-nowrap w-16">Órdenes</th>
+                        <th class="px-2 py-2 text-right font-bold text-gray-500 whitespace-nowrap w-14">Conv.</th>
+                        <th class="px-2 py-2 text-center font-bold text-gray-500 whitespace-nowrap w-14">Score</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     ${pubs.map((p, i) => {
                         const titulo = p.titulo || p.id_publicacion;
-                        const truncado = titulo.length > 40 ? titulo.substring(0, 40) + '...' : titulo;
                         return `<tr class="hover:bg-gray-50">
                             <td class="px-2 py-2 text-gray-400 font-bold">${i + 1}</td>
                             <td class="px-2 py-2">
-                                <a href="${p.permalink || '#'}" target="_blank" class="text-blue-600 hover:underline" title="${titulo}">${truncado}</a>
+                                <a href="${p.permalink || '#'}" target="_blank" class="text-blue-600 hover:underline truncate block" title="${titulo}">${titulo}</a>
                             </td>
-                            <td class="px-2 py-2 text-right font-medium">${formatearNumero(p.visitas)}</td>
-                            <td class="px-2 py-2 text-right">${p.ordenes}</td>
-                            <td class="px-2 py-2 text-right font-medium">${p.conversion_pct}%</td>
-                            <td class="px-2 py-2 text-center"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${scoreColor(p.score_ml)}">${p.score_ml || '-'}</span></td>
+                            <td class="px-2 py-2 text-right font-medium whitespace-nowrap">${formatearNumero(p.visitas)}</td>
+                            <td class="px-2 py-2 text-right whitespace-nowrap">${p.ordenes}</td>
+                            <td class="px-2 py-2 text-right font-medium whitespace-nowrap">${p.conversion_pct}%</td>
+                            <td class="px-2 py-2 text-center whitespace-nowrap"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${scoreColor(p.score_ml)}">${p.score_ml || '-'}</span></td>
                         </tr>`;
                     }).join('')}
                 </tbody>
