@@ -846,9 +846,11 @@ export const moduloDashboard = {
             // Llamar a las Edge Functions en PARALELO:
             // - sync-orders: ordenes (incremental)
             // - sync-ads: costos de publicidad (incremental)
-            const [ordersResult, adsResult] = await Promise.all([
+            // - sync-visitas: visitas últimos 3 días
+            const [ordersResult, adsResult, _visitasResult] = await Promise.all([
                 supabase.functions.invoke('sync-meli', { body: { action: 'sync-orders' } }),
-                supabase.functions.invoke('sync-meli', { body: { action: 'sync-ads' } })
+                supabase.functions.invoke('sync-meli', { body: { action: 'sync-ads' } }),
+                supabase.functions.invoke('sync-meli', { body: { action: 'sync-visitas' } })
             ]);
 
             if (ordersResult.error) throw ordersResult.error;
