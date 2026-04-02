@@ -469,10 +469,10 @@ export const moduloCostos = {
                 );
                 return rango ? parseFloat(rango.costo_fijo) || 0 : 0;
             }
-            // Fallback hardcoded del informe (vigencia 2025/2026)
-            if (precioDesde < 15000) return 1115;
-            if (precioDesde < 25000) return 2300;
-            if (precioDesde < 33000) return 2810;
+            // Fallback hardcoded del informe (vigencia 2026)
+            if (precioDesde < 16000) return 1255;
+            if (precioDesde < 24000) return 2500;
+            if (precioDesde < 33000) return 3030;
             return 0;
         };
 

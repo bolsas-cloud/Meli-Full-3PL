@@ -89,12 +89,14 @@ export const moduloPYL = {
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Envios</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Publicidad</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Impuestos</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Devoluciones</th>
+                                    <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Otros</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Margen Real</th>
                                     <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">% Margen</th>
                                 </tr>
                             </thead>
                             <tbody id="pyl-tabla-body" class="divide-y divide-gray-100">
-                                <tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">Cargando datos...</td></tr>
+                                <tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Cargando datos...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -199,14 +201,16 @@ export const moduloPYL = {
                 const publicidadBilling = Math.abs(billing?.total_publicidad || 0);
                 const publicidad = publicidadBilling > 0 ? publicidadBilling : gastoAds;
                 const impuestos = Math.abs(billing?.total_impuestos || 0);
-                const totalCostosML = comisiones + cargosFijos + envios + publicidad + impuestos;
+                const reembolsos = Math.abs(billing?.total_reembolsos || 0);
+                const otros = Math.abs(billing?.total_otros || 0);
+                const totalCostosML = comisiones + cargosFijos + envios + publicidad + impuestos + reembolsos + otros;
                 const margen = ventas - cogs - totalCostosML;
                 const pctMargen = ventas > 0 ? (margen / ventas) * 100 : 0;
-                const tieneCostos = comisiones > 0 || envios > 0 || cargosFijos > 0 || impuestos > 0;
+                const tieneCostos = comisiones > 0 || envios > 0 || cargosFijos > 0 || impuestos > 0 || reembolsos > 0 || otros > 0;
 
                 return {
                     key, anio: parseInt(anio), mes: parseInt(mes),
-                    ventas, cogs, comisiones, cargosFijos, envios, publicidad, impuestos,
+                    ventas, cogs, comisiones, cargosFijos, envios, publicidad, impuestos, reembolsos, otros,
                     totalCostosML, margen, pctMargen, tieneCostos
                 };
             }).filter(d => d.ventas > 0 || d.tieneCostos);
@@ -271,7 +275,7 @@ export const moduloPYL = {
         const mesesConDatos = datosMensuales.filter(d => d.tieneCostos);
 
         if (mesesConDatos.length === 0) {
-            body.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-400">Sincroniza Billing ML para ver el P&L</td></tr>';
+            body.innerHTML = '<tr><td colspan="12" class="px-4 py-8 text-center text-gray-400">Sincroniza Billing ML para ver el P&L</td></tr>';
             return;
         }
 
@@ -287,6 +291,8 @@ export const moduloPYL = {
                     <td class="px-4 py-3 text-right text-orange-600">$ ${fmt(d.envios)}</td>
                     <td class="px-4 py-3 text-right text-purple-600">$ ${fmt(d.publicidad)}</td>
                     <td class="px-4 py-3 text-right text-red-600">$ ${fmt(d.impuestos)}</td>
+                    <td class="px-4 py-3 text-right text-pink-600">${d.reembolsos > 0 ? '$ ' + fmt(d.reembolsos) : '<span class="text-gray-300">-</span>'}</td>
+                    <td class="px-4 py-3 text-right text-gray-600">${d.otros > 0 ? '$ ' + fmt(d.otros) : '<span class="text-gray-300">-</span>'}</td>
                     <td class="px-4 py-3 text-right font-bold ${d.margen >= 0 ? 'text-green-600' : 'text-red-600'}">$ ${fmt(d.margen)}</td>
                     <td class="px-4 py-3 text-right font-bold ${d.pctMargen >= 20 ? 'text-green-600' : d.pctMargen >= 0 ? 'text-yellow-600' : 'text-red-600'}">${d.pctMargen.toFixed(1)}%</td>
                 </tr>
@@ -317,6 +323,8 @@ export const moduloPYL = {
                     { label: 'Envios', data: ultimos.map(d => -d.envios), backgroundColor: 'rgba(249, 115, 22, 0.7)', stack: 'costos', order: 2 },
                     { label: 'Publicidad', data: ultimos.map(d => -d.publicidad), backgroundColor: 'rgba(139, 92, 246, 0.7)', stack: 'costos', order: 2 },
                     { label: 'Impuestos', data: ultimos.map(d => -d.impuestos), backgroundColor: 'rgba(239, 68, 68, 0.7)', stack: 'costos', order: 2 },
+                    { label: 'Devoluciones', data: ultimos.map(d => -d.reembolsos), backgroundColor: 'rgba(236, 72, 153, 0.7)', stack: 'costos', order: 2 },
+                    { label: 'Otros', data: ultimos.map(d => -d.otros), backgroundColor: 'rgba(107, 114, 128, 0.7)', stack: 'costos', order: 2 },
                     {
                         label: '% Margen',
                         data: ultimos.map(d => d.pctMargen),
@@ -402,6 +410,8 @@ export const moduloPYL = {
         <tr><td>(-) Envios</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.envios)}</td>`).join('')}</tr>
         <tr><td>(-) Publicidad</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.publicidad)}</td>`).join('')}</tr>
         <tr><td>(-) Impuestos</td>${mesesPDF.map(d => `<td class="negative">$ ${fmt(d.impuestos)}</td>`).join('')}</tr>
+        <tr><td>(-) Devoluciones</td>${mesesPDF.map(d => `<td class="${d.reembolsos > 0 ? 'negative' : ''}">${d.reembolsos > 0 ? '$ ' + fmt(d.reembolsos) : '-'}</td>`).join('')}</tr>
+        <tr><td>(-) Otros</td>${mesesPDF.map(d => `<td class="${d.otros > 0 ? 'negative' : ''}">${d.otros > 0 ? '$ ' + fmt(d.otros) : '-'}</td>`).join('')}</tr>
         <tr class="total-row"><td>= Margen Real</td>${mesesPDF.map(d => `<td class="${d.margen >= 0 ? 'positive' : 'negative'}">$ ${fmt(d.margen)}</td>`).join('')}</tr>
         <tr class="total-row"><td>% Margen</td>${mesesPDF.map(d => `<td class="${d.pctMargen >= 20 ? 'positive' : 'negative'}">${d.pctMargen.toFixed(1)}%</td>`).join('')}</tr>
     </tbody>

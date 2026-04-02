@@ -43,6 +43,7 @@ Deploys to Vercel on push to `master`.
 | `mensajes.js` | Inbox unificado preguntas + mensajes ML, sincronización, respuestas rápidas |
 | `knowledgeBase.js` | CRUD de documentos para la base de conocimiento del agente IA (RAG) |
 | `analiticas.js` | Dashboard analíticas: KPIs atención, gráficos Chart.js, patrones, recomendaciones IA |
+| `trafico.js` | Dashboard tráfico: visitas diarias, conversión, performance ML, eventos tienda |
 
 ### Module Pattern
 ```javascript

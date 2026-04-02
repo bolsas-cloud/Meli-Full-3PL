@@ -138,11 +138,12 @@ export const moduloAds = {
                                     <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('ventas_monto')">Revenue <span id="sort-ventas_monto"></span></th>
                                     <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('roas')">ROAS <span id="sort-roas"></span></th>
                                     <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('acos')">ACOS <span id="sort-acos"></span></th>
+                                    <th class="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase cursor-pointer hover:text-gray-800" onclick="moduloAds.ordenar('cvr')">CVR <span id="sort-cvr"></span></th>
                                     <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase">Accion</th>
                                 </tr>
                             </thead>
                             <tbody id="ads-productos-body" class="divide-y divide-gray-100">
-                                <tr><td colspan="13" class="px-4 py-8 text-center text-gray-400">Sincroniza para cargar datos</td></tr>
+                                <tr><td colspan="14" class="px-4 py-8 text-center text-gray-400">Sincroniza para cargar datos</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -329,6 +330,7 @@ export const moduloAds = {
         resumenProductos = Object.values(porItem).map(p => {
             const ctr = p.impresiones > 0 ? (p.clicks / p.impresiones) * 100 : 0;
             const cpc = p.clicks > 0 ? p.costo / p.clicks : 0;
+            const cvr = p.clicks > 0 ? (p.ventas_unidades / p.clicks) * 100 : 0;
             const roas = p.costo > 0 ? p.ventas_monto / p.costo : 0;
             const acos = p.ventas_monto > 0 ? (p.costo / p.ventas_monto) * 100 : 0;
 
@@ -344,7 +346,7 @@ export const moduloAds = {
                 semaforo = 'pausar'; accion = 'Considerar pausar';
             }
 
-            return { ...p, ctr, cpc, roas, acos, semaforo, accion };
+            return { ...p, ctr, cpc, cvr, roas, acos, semaforo, accion };
         }).sort((a, b) => b.ventas_monto - a.ventas_monto);
     },
 
@@ -353,7 +355,7 @@ export const moduloAds = {
         if (!body) return;
 
         if (resumenProductos.length === 0) {
-            body.innerHTML = '<tr><td colspan="13" class="px-4 py-8 text-center text-gray-400">Sin datos de publicidad</td></tr>';
+            body.innerHTML = '<tr><td colspan="14" class="px-4 py-8 text-center text-gray-400">Sin datos de publicidad</td></tr>';
             return;
         }
 
@@ -383,6 +385,7 @@ export const moduloAds = {
                 <td class="px-3 py-2 text-sm text-right font-medium">$ ${fmt(p.ventas_monto)}</td>
                 <td class="px-3 py-2 text-sm text-right font-bold ${p.roas >= 4 ? 'text-green-600' : p.roas >= 2 ? 'text-yellow-600' : 'text-red-600'}">${p.roas.toFixed(1)}x</td>
                 <td class="px-3 py-2 text-sm text-right ${p.acos <= 25 ? 'text-green-600' : p.acos <= 40 ? 'text-yellow-600' : 'text-red-600'}">${p.acos.toFixed(1)}%</td>
+                <td class="px-3 py-2 text-sm text-right ${p.cvr >= 5 ? 'text-green-600' : p.cvr >= 2 ? 'text-yellow-600' : 'text-red-600'}">${p.cvr.toFixed(2)}%</td>
                 <td class="px-3 py-2 text-center">
                     <span class="text-xs px-2 py-0.5 rounded-full ${
                         p.semaforo === 'estrella' ? 'bg-green-100 text-green-700' :
@@ -588,7 +591,7 @@ export const moduloAds = {
     <thead><tr>
         <th></th><th>SKU</th><th>Item</th><th class="num">Impresiones</th><th class="num">Clicks</th>
         <th class="num">CTR</th><th class="num">Gasto</th><th class="num">CPC</th>
-        <th class="num">Ventas</th><th class="num">Revenue</th><th class="num">ROAS</th><th class="num">ACOS</th><th>Accion</th>
+        <th class="num">Ventas</th><th class="num">Revenue</th><th class="num">ROAS</th><th class="num">ACOS</th><th class="num">CVR</th><th>Accion</th>
     </tr></thead>
     <tbody>
         ${resumenProductos.map(p => `
@@ -605,6 +608,7 @@ export const moduloAds = {
             <td class="num">$ ${fmt(p.ventas_monto)}</td>
             <td class="num ${p.roas >= 4 ? 'good' : p.roas >= 2 ? 'warn' : 'bad'}" style="font-weight:700">${p.roas.toFixed(1)}x</td>
             <td class="num ${p.acos <= 25 ? 'good' : p.acos <= 40 ? 'warn' : 'bad'}">${p.acos.toFixed(1)}%</td>
+            <td class="num ${p.cvr >= 5 ? 'good' : p.cvr >= 2 ? 'warn' : 'bad'}">${p.cvr.toFixed(2)}%</td>
             <td>${p.accion}</td>
         </tr>`).join('')}
     </tbody>
