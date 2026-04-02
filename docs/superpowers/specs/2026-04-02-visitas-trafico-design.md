@@ -211,7 +211,138 @@ CREATE TABLE tendencias_ml (
 
 ---
 
-## 8. Archivos afectados
+## 8. Marcadores de Eventos (timeline de acciones)
+
+### Concepto
+
+Sistema de anotaciones que se superponen al gráfico de visitas para correlacionar acciones con resultados. Combina eventos detectados automáticamente + anotaciones manuales del vendedor.
+
+```
+Gráfico de visitas (ejemplo visual)
+
+         ▲ +30% presupuesto ads         Hot Sale
+              │                            │
+     ░░░░░░░░█████░░░░░░░░░░░████████████████░░░░░░
+              ▼ Pausé publicación X
+                                    ▲ Precio -15%
+
+└─────────────────────────────────────────────────── tiempo
+     Los marcadores aparecen como líneas verticales con tooltip
+```
+
+### Tabla `eventos_tienda`
+
+```sql
+CREATE TABLE eventos_tienda (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fecha DATE NOT NULL,
+    tipo TEXT NOT NULL,
+    subtipo TEXT,
+    titulo TEXT NOT NULL,
+    descripcion TEXT,
+    id_publicacion TEXT,
+    datos JSONB DEFAULT '{}',
+    origen TEXT DEFAULT 'manual',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_eventos_fecha ON eventos_tienda(fecha DESC);
+CREATE INDEX idx_eventos_tipo ON eventos_tienda(tipo);
+
+GRANT ALL ON eventos_tienda TO anon, authenticated, service_role;
+```
+
+### Tipos de eventos
+
+#### Automáticos (detectados por el sync comparando con día anterior)
+
+| Tipo | Subtipo | Ejemplo | Detección |
+|------|---------|---------|-----------|
+| `precio` | `aumento` / `descuento` | "Bolsa 20x30: $8.500 → $9.200 (+8%)" | Comparar precio actual vs `publicaciones_meli.precio` anterior |
+| `ads` | `presupuesto` | "Presupuesto diario: $25.000 → $30.000" | Comparar gasto en `ads_metricas_diarias` vs promedio 7 días |
+| `ads` | `activacion` / `pausa` | "Campaña X activada" | Detectar cambio de estado en campañas |
+| `publicacion` | `pausa` / `activacion` | "Bolsa Tote Bag pausada" | Cambio en `publicaciones_meli.estado` |
+| `stock` | `agotado` / `repuesto` | "Bolsa 15x20: stock agotado" | `stock_full` pasa a 0 o vuelve de 0 |
+
+#### Manuales (el vendedor los registra)
+
+| Tipo | Subtipo | Ejemplo |
+|------|---------|---------|
+| `promocion` | `hot_sale` / `cybermonday` / `descuento_ml` / `otra` | "Participando en Hot Sale -20%" |
+| `mercado` | `temporada` / `fecha_especial` / `fin_de_mes` | "Día de la Madre — alta demanda souvenirs" |
+| `estrategia` | `precio` / `ads` / `catalogo` | "Subí presupuesto ads de 25K a 30K" |
+| `competencia` | `observacion` | "Competidor principal bajó precios 15%" |
+| `otro` | libre | Cualquier anotación relevante |
+
+### UI para registrar eventos manuales
+
+Botón "Agregar evento" en el dashboard de tráfico que abre un modal simple:
+
+```
+┌─────────────────────────────────────────┐
+│  Registrar evento                    ✕  │
+├─────────────────────────────────────────┤
+│                                         │
+│  Fecha: [02/04/2026    ]               │
+│                                         │
+│  Tipo:  [Promoción         ▼]          │
+│                                         │
+│  Título: [Hot Sale -20%         ]      │
+│                                         │
+│  Descripción (opcional):                │
+│  [Participamos con 15 publicaciones  ]  │
+│  [descuento 20% por 3 días           ]  │
+│                                         │
+│  Publicación (opcional): [Todas  ▼]    │
+│                                         │
+│              [Cancelar] [Guardar]       │
+└─────────────────────────────────────────┘
+```
+
+### Visualización en el gráfico
+
+Los eventos se muestran como **líneas verticales punteadas** sobre el gráfico de visitas diarias:
+
+- **Color por tipo**: azul (ads), verde (precio), naranja (promoción), gris (mercado), rojo (stock agotado)
+- **Tooltip al hover**: muestra título + descripción del evento
+- **Chart.js plugin**: usar `annotation` plugin o dibujar líneas manualmente con `afterDraw`
+
+### Detección automática de eventos
+
+En el sync diario de visitas, después de guardar los datos, comparar con el día anterior:
+
+```javascript
+// Pseudocódigo en sync-meli action 'sync-visitas'
+for (const pub of publicaciones) {
+    // Detectar cambio de precio
+    if (pub.precio !== pub.precio_anterior && pub.precio_anterior) {
+        const pct = ((pub.precio - pub.precio_anterior) / pub.precio_anterior * 100).toFixed(1);
+        insertEvento('precio', pct > 0 ? 'aumento' : 'descuento',
+            `${pub.titulo}: $${pub.precio_anterior} → $${pub.precio} (${pct}%)`, pub.id_publicacion);
+    }
+    // Detectar cambio de estado
+    if (pub.estado !== pub.estado_anterior) {
+        insertEvento('publicacion', pub.estado === 'active' ? 'activacion' : 'pausa',
+            `${pub.titulo}: ${pub.estado_anterior} → ${pub.estado}`, pub.id_publicacion);
+    }
+    // Detectar stock agotado
+    if (pub.stock_full === 0 && pub.stock_anterior > 0) {
+        insertEvento('stock', 'agotado', `${pub.titulo}: stock agotado`, pub.id_publicacion);
+    }
+}
+```
+
+### Correlación con métricas (análisis futuro)
+
+Con esta data se puede calcular:
+- **Impacto de una promoción**: visitas promedio 7 días antes vs 7 días durante
+- **Efecto de cambio de precio**: conversión pre/post cambio
+- **ROI de aumento de presupuesto ads**: visitas incrementales vs costo adicional
+- El agente IA puede usar `eventos_tienda` para explicar por qué subieron o bajaron las visitas
+
+---
+
+## 9. Archivos afectados
 
 | Archivo | Acción | Cambios |
 |---------|--------|---------|
@@ -220,19 +351,20 @@ CREATE TABLE tendencias_ml (
 | `src/router.js` | Modify | Agregar ruta `trafico` |
 | `index.html` | Modify | Nav item en sidebar |
 | Edge Function `meli-agente` | Modify | Agregar tool `analizar_publicacion` |
-| SQL (Supabase) | Execute | Crear tablas + RPC |
+| SQL (Supabase) | Execute | Crear tablas (`visitas_historial`, `performance_publicaciones`, `tendencias_ml`, `eventos_tienda`) + RPC |
 | `CLAUDE.md` | Modify | Documentar nuevas tablas, módulo, tool |
 
 ---
 
 ## 9. Orden de implementación
 
-1. **Tablas + RPC** — `visitas_historial`, `performance_publicaciones`, `tendencias_ml`, RPC métricas
-2. **Sync en sync-meli** — acciones sync-visitas, backfill, sync-performance, sync-tendencias
+1. **Tablas + RPC** — `visitas_historial`, `performance_publicaciones`, `tendencias_ml`, `eventos_tienda`, RPC métricas
+2. **Sync en sync-meli** — acciones sync-visitas, backfill, sync-performance, sync-tendencias + detección automática de eventos
 3. **Backfill** — correr una vez para traer 150 días de historia
-4. **Dashboard frontend** — módulo `trafico.js` con KPIs, gráfico, tabla
-5. **Tool agente** — `analizar_publicacion` con datos cruzados
-6. **Cron** — programar sync diario de visitas y semanal de performance/tendencias
+4. **Dashboard frontend** — módulo `trafico.js` con KPIs, gráfico con marcadores de eventos, tabla publicaciones, oportunidades
+5. **Modal eventos manuales** — registrar promociones, cambios de estrategia, fechas especiales
+6. **Tool agente** — `analizar_publicacion` con datos cruzados + eventos
+7. **Cron** — programar sync diario de visitas y semanal de performance/tendencias
 
 ---
 
