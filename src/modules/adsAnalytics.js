@@ -58,7 +58,7 @@ export const moduloAds = {
 
                 <!-- KPI Cards -->
                 <p class="text-xs text-gray-400" id="ads-kpi-rango"></p>
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <span class="text-xs font-medium text-gray-500">Gasto Total</span>
                         <p class="text-lg font-bold text-gray-800 mt-1" id="kpi-ads-gasto">-</p>
@@ -87,6 +87,11 @@ export const moduloAds = {
                         <span class="text-xs font-medium text-gray-500">CTR Promedio</span>
                         <p class="text-lg font-bold text-gray-800 mt-1" id="kpi-ads-ctr">-</p>
                         <span class="text-[10px] text-gray-400" id="kpi-ads-cpc"></span>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                        <span class="text-xs font-medium text-gray-500"><i class="fas fa-leaf text-green-500 mr-1"></i>Ventas Organicas</span>
+                        <p class="text-lg font-bold text-green-600 mt-1" id="kpi-ads-organicas">-</p>
+                        <span class="text-[10px] text-gray-400" id="kpi-ads-organicas-pct"></span>
                     </div>
                 </div>
 
@@ -287,6 +292,15 @@ export const moduloAds = {
 
         const cpcEl = document.getElementById('kpi-ads-cpc');
         if (cpcEl) cpcEl.textContent = `CPC: $ ${cpc.toFixed(0)}`;
+
+        // Ventas organicas estimadas = ventas totales del periodo - ventas atribuidas a ads
+        const ventasAds = totales.revenueAds;
+        const ventasOrganicas = Math.max(0, ventasTotales - ventasAds);
+        const pctOrganico = ventasTotales > 0 ? Math.round(ventasOrganicas / ventasTotales * 100) : 0;
+
+        setEl('kpi-ads-organicas', fmt(ventasOrganicas));
+        const pctOrgEl = document.getElementById('kpi-ads-organicas-pct');
+        if (pctOrgEl) pctOrgEl.textContent = `${pctOrganico}% del total`;
     },
 
     calcularResumenProductos: (data) => {
@@ -568,6 +582,7 @@ export const moduloAds = {
     <div class="kpi"><div class="label">TACOS</div><div class="value ${tacos <= 15 ? 'good' : tacos <= 25 ? 'warn' : 'bad'}">${tacos.toFixed(1)}%</div></div>
     <div class="kpi"><div class="label">Revenue Ads</div><div class="value">$ ${fmt(totRevenue)}</div></div>
     <div class="kpi"><div class="label">Unidades</div><div class="value">${totUnidades}</div></div>
+    <div class="kpi"><div class="label">🌿 Ventas Organicas</div><div class="value good">$ ${fmt(Math.max(0, ventasTotales - totRevenue))} (${ventasTotales > 0 ? Math.round(Math.max(0, ventasTotales - totRevenue) / ventasTotales * 100) : 0}%)</div></div>
 </div>
 <table>
     <thead><tr>
